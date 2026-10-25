@@ -1,5 +1,7 @@
 package com.mycompany.reseep;
 
+import jakarta.enterprise.event.Event;
+import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.transaction.Transactional;
@@ -17,6 +19,9 @@ public class PantryResource {
 
     @PersistenceContext(unitName = "reseepPU")
     private EntityManager em;
+
+    @Inject
+    private Event<LiveUpdate> liveUpdates;
 
     @GET
     public List<IngredientDto> list() {
@@ -36,6 +41,7 @@ public class PantryResource {
         em.persist(ingredient);
         em.flush();
 
+        liveUpdates.fire(LiveUpdate.pantry("created", ingredient.getId()));
         return Response.status(Response.Status.CREATED).entity(toDto(ingredient)).build();
     }
 
@@ -51,6 +57,7 @@ public class PantryResource {
         if (validation != null) return validation;
 
         applyFields(ingredient, dto);
+        liveUpdates.fire(LiveUpdate.pantry("updated", id));
         return Response.ok(toDto(ingredient)).build();
     }
 

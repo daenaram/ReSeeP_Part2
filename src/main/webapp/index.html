@@ -367,6 +367,8 @@
     top:-1px;
   }
   .status-dot.live{ background:var(--herb); }
+  .status-dot.offline{ background:var(--alert); }
+  .status-sep{ margin:0 8px; color:var(--line); }
 
   @media (prefers-reduced-motion: reduce){
     .toast{ transition:none; }
@@ -396,7 +398,7 @@
     <button class="tab-btn" data-view="pantry" role="tab" aria-selected="false">Pantry</button>
   </nav>
 
-  <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span></p>
+  <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span><span class="status-sep">|</span><span class="status-dot" id="liveDot"></span><span id="liveStatusText" aria-live="polite">Live updates connecting…</span></p>
 
   <!-- RECIPES LIST -->
   <section class="view" id="view-recipes">
@@ -1014,15 +1016,118 @@ el("btnAddPantryItem").addEventListener("click", async () => {
   showToast(created ? "Added to pantry" : "Added locally (no server connected)");
 });
 
+// ---- Live updates (WebSocket) ----------------------------------------------
+// The server pushes a small {type, action, id} message after every committed
+// change to the pantry or recipes. We don't trust the message for data —
+// we just re-fetch over REST, so the API stays the single source of truth.
+// "http://host/reseep/api" -> "ws://host/reseep/ws/updates"
+const WS_URL = API_BASE.replace(/^http/, "ws").replace(/\/api\/?$/, "") + "/ws/updates";
+const MIN_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 10000;
+
+let reconnectDelay = MIN_RECONNECT_DELAY;
+let liveConnectedBefore = false;
+let refreshTimer = null;
+
+function setLiveStatus(state) {
+  const labels = {
+    live: "Live updates on",
+    reconnecting: `Live updates lost — retrying in ${Math.round(reconnectDelay / 1000)}s`,
+  };
+  el("liveDot").className = "status-dot" + (state === "live" ? " live" : " offline");
+  el("liveStatusText").textContent = labels[state];
+}
+
+function connectLiveUpdates() {
+  const socket = new WebSocket(WS_URL);
+
+  socket.onopen = () => {
+    reconnectDelay = MIN_RECONNECT_DELAY;
+    setLiveStatus("live");
+    // Anything that changed while we were disconnected was never pushed to
+    // us, so reload the full current state. Also covers the case where the
+    // page booted on sample data because the server was down.
+    if (liveConnectedBefore || !usingLiveApi) {
+      refreshFromServer("Reconnected — showing latest data");
+    }
+    liveConnectedBefore = true;
+  };
+
+  socket.onmessage = (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    if (msg.type === "pantry-updated" || msg.type === "recipe-updated") {
+      scheduleRefresh();
+    }
+  };
+
+  // onerror is always followed by onclose, so retrying lives here only.
+  socket.onclose = () => {
+    setLiveStatus("reconnecting");
+    setTimeout(connectLiveUpdates, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+  };
+}
+
+// Several changes can land together (e.g. a recipe save that also added a
+// pantry item), so coalesce them into one refresh.
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => refreshFromServer(), 150);
+}
+
+async function refreshFromServer(toastMsg) {
+  try {
+    [recipes, ingredients] = await Promise.all([apiRequest("/recipes"), apiRequest("/pantry")]);
+    usingLiveApi = true;
+  } catch (e) {
+    return; // keep showing what we have; the socket will trigger another try
+  }
+  updateApiStatus();
+  renderRecipeList();
+  renderPantryKeepingFocus();
+
+  // If the recipe being edited was deleted by another user, say so rather
+  // than letting a later save fail with a confusing 404.
+  const editing = currentRecipe && !el("view-detail").hidden;
+  if (editing && !currentRecipe.id.toString().startsWith("new-")) {
+    if (!recipes.some((r) => r.id === currentRecipe.id)) {
+      showToast("This recipe was deleted by another user");
+      backToRecipes();
+      return;
+    }
+    renderMissingPanel(); // pantry quantities may have changed
+  }
+  if (toastMsg) showToast(toastMsg);
+}
+
+// Re-rendering the pantry rebuilds its inputs, which would kick the user out
+// of a box they're typing in. Put focus (and their unsaved value) back.
+function renderPantryKeepingFocus() {
+  const active = document.activeElement;
+  const focusedId = active && active.classList.contains("pantryQtyInput") ? active.dataset.id : null;
+  const typedValue = focusedId ? active.value : null;
+  renderPantry();
+  if (focusedId) {
+    const input = document.querySelector(`.pantryQtyInput[data-id="${focusedId}"]`);
+    if (input) { input.value = typedValue; input.focus(); }
+  }
+}
+
 // ---- Boot ------------------------------------------------------------------
-async function init() {
-  [recipes, ingredients] = await Promise.all([loadRecipes(), loadPantry()]);
+function updateApiStatus() {
   el("apiDot").classList.toggle("live", usingLiveApi);
   el("apiStatusText").textContent = usingLiveApi
     ? `Connected to ${API_BASE}`
     : `No server at ${API_BASE} — showing sample data`;
+}
+
+async function init() {
+  [recipes, ingredients] = await Promise.all([loadRecipes(), loadPantry()]);
+  updateApiStatus();
   renderRecipeList();
   renderPantry();
+  connectLiveUpdates();
 }
 
 init();
