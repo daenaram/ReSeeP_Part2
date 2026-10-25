@@ -1033,6 +1033,7 @@ function setLiveStatus(state) {
   const labels = {
     live: "Live updates on",
     reconnecting: `Live updates lost — retrying in ${Math.round(reconnectDelay / 1000)}s`,
+    disabled: "Live updates off (?live=off) — reload to see others' changes",
   };
   el("liveDot").className = "status-dot" + (state === "live" ? " live" : " offline");
   el("liveStatusText").textContent = labels[state];
@@ -1040,6 +1041,7 @@ function setLiveStatus(state) {
 
 function connectLiveUpdates() {
   const socket = new WebSocket(WS_URL);
+  window.liveSocket = socket; // lets you run liveSocket.close() in the console to test reconnects
 
   socket.onopen = () => {
     reconnectDelay = MIN_RECONNECT_DELAY;
@@ -1127,7 +1129,13 @@ async function init() {
   updateApiStatus();
   renderRecipeList();
   renderPantry();
-  connectLiveUpdates();
+  // ?live=off runs the page on REST alone, to show it still works when the
+  // WebSocket is unavailable.
+  if (new URLSearchParams(location.search).get("live") === "off") {
+    setLiveStatus("disabled");
+  } else {
+    connectLiveUpdates();
+  }
 }
 
 init();
