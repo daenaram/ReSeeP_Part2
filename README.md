@@ -90,6 +90,20 @@ a blank recipe/ingredient name, a negative quantity, or an unknown
 JSON error message. Requesting a recipe/ingredient id that doesn't exist
 returns `404 Not Found`.
 
+## Test accounts
+
+| Username  | Password  | Role    | Web views                                   |
+|-----------|-----------|---------|---------------------------------------------|
+| `cook`    | `cook123` | Cook    | Recipes, Pantry, Meal plan, Shopping list   |
+| `shopper` | `shop123` | Shopper | Shopping list, Pantry                       |
+
+The web client signs in with `POST /api/login` (`{ username, password }` →
+`{ id, username, role }`). Until that endpoint exists, the page falls back to
+the accounts above and says so in the sign-in toast. The signed-in user is
+kept in `sessionStorage`, so it lasts until the tab is closed. Hiding views
+by role is only a convenience in the UI; the API is responsible for
+enforcing roles.
+
 ## Live updates (WebSocket)
 
 Open web pages connect to:
