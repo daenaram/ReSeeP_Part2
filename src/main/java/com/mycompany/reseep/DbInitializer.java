@@ -49,7 +49,26 @@ public class DbInitializer {
                     "CONSTRAINT fk_ri_recipe FOREIGN KEY (recipe_id) REFERENCES recipe(id) ON DELETE CASCADE," +
                     "CONSTRAINT fk_ri_ingredient FOREIGN KEY (ingredient_id) REFERENCES ingredient(id) ON DELETE RESTRICT)");
 
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS app_user (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                    "username VARCHAR(50) NOT NULL UNIQUE," +
+                    "password VARCHAR(100) NOT NULL," +
+                    "role VARCHAR(20) NOT NULL)");
+
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS shopping_item (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                    "ingredient_id BIGINT NOT NULL," +
+                    "qty DOUBLE NOT NULL," +
+                    "status VARCHAR(20) NOT NULL," +
+                    "added_by_id BIGINT NOT NULL," +
+                    "bought_by_id BIGINT," +
+                    "bought_at DATETIME," +
+                    "CONSTRAINT fk_si_ingredient FOREIGN KEY (ingredient_id) REFERENCES ingredient(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_si_added_by FOREIGN KEY (added_by_id) REFERENCES app_user(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_si_bought_by FOREIGN KEY (bought_by_id) REFERENCES app_user(id) ON DELETE RESTRICT)");
+
             seedIfEmpty(conn);
+            seedUsersIfEmpty(conn);
 
             System.out.println("[DbInitializer] Schema check complete.");
         } catch (SQLException e) {
@@ -89,6 +108,27 @@ public class DbInitializer {
                     "(1,1,200),(1,2,3),(1,3,10),(1,4,2)," +
                     "(2,5,300),(2,6,2),(2,7,2)," +
                     "(3,8,400),(3,9,2),(3,10,3)");
+        }
+    }
+
+    /**
+     * Two test accounts so the group can demo both roles straight away
+     * without a signup screen. Plaintext passwords only, matching the
+     * "simple login" scope — see README Known limitations.
+     */
+    private void seedUsersIfEmpty(Connection conn) throws SQLException {
+        try (Statement check = conn.createStatement();
+             ResultSet rs = check.executeQuery("SELECT COUNT(*) FROM app_user")) {
+            rs.next();
+            if (rs.getInt(1) > 0) {
+                return;
+            }
+        }
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO app_user (username, password, role) VALUES " +
+                    "('cook','cook123','COOK')," +
+                    "('shopper','shopper123','SHOPPER')");
         }
     }
 }

@@ -24,6 +24,9 @@ public class RecipeResource {
     @Inject
     private Event<LiveUpdate> liveUpdates;
 
+    @Inject
+    private ShoppingListService shoppingListService;
+
     @GET
     public List<RecipeDto> list() {
         List<Recipe> recipes = em.createQuery("SELECT r FROM Recipe r", Recipe.class).getResultList();
@@ -94,6 +97,22 @@ public class RecipeResource {
         em.remove(recipe);
         liveUpdates.fire(LiveUpdate.recipe("deleted", id));
         return Response.noContent().build();
+    }
+
+    /**
+     * Workflow 1 from the brief: work out what's missing to cook this
+     * recipe and add the shortfall to the shared shopping list.
+     */
+    @POST
+    @Path("/{id}/plan")
+    public Response plan(@PathParam("id") Long id, ActingUserRequest request) {
+        try {
+            Long userId = request == null ? null : request.getUserId();
+            List<ShoppingItemDto> added = shoppingListService.planForRecipe(id, userId);
+            return Response.ok(added).build();
+        } catch (RecipeNotFoundException | UserNotFoundException e) {
+            return notFound(e.getMessage());
+        }
     }
 
     private Response validate(RecipeDto dto) {
