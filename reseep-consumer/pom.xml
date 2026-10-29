@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-      Deliberately a separate, standalone Maven project -- not a module of
+      Deliberately a separate, standalone Maven project, not a module of
       the main reseep webapp, and not deployed to Payara. It's its own plain
       Java program: a different, independently running process from the
       web app, which is the whole point of using a message broker to connect
@@ -35,7 +35,7 @@
             <version>9.7.0</version>
         </dependency>
 
-        <!-- Small JSON library for reading the event payload -- the web
+        <!-- Small JSON library for reading the event payload. The web
              app can use jakarta.json because Payara provides it, but this
              is a plain Java program with no Jakarta EE container. -->
         <dependency>
