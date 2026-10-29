@@ -1,0 +1,15 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: reseep-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port -- used by the web app and the consumer
+      - "15672:15672"  # Management UI -- http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: reseep
+      RABBITMQ_DEFAULT_PASS: reseep
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+volumes:
+  rabbitmq_data:

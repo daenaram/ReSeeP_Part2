@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ReSeeP — recipe &amp; pantry tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F2F4EC;
+    --surface:#FFFFFF;
+    --ink:#202B1F;
+    --ink-soft:#55614F;
+    --herb:#4C6B45;
+    --herb-dark:#33482F;
+    --spice:#C67D2E;
+    --spice-dark:#9C5E1D;
+    --alert:#AE4238;
+    --alert-dark:#8A322A;
+    --line:#D8DCC9;
+    --focus:#2F6FDB;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", system-ui, sans-serif;
+    font-size:15px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  a{ color:inherit; }
+  button{ font-family:inherit; font-size:inherit; color:inherit; }
+
+  :focus-visible{
+    outline:2px solid var(--focus);
+    outline-offset:2px;
+    border-radius:2px;
+  }
+
+  .shell{
+    max-width:760px;
+    margin:0 auto;
+    padding:40px 24px 96px;
+  }
+
+  /* ---------- Header ---------- */
+  .app-header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:16px;
+    margin-bottom:28px;
+    flex-wrap:wrap;
+  }
+  .app-title{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:34px;
+    letter-spacing:-0.01em;
+    margin:0;
+  }
+  .app-title span{ color:var(--herb); }
+  .app-tagline{
+    margin:4px 0 0;
+    color:var(--ink-soft);
+    font-size:14px;
+    max-width:34ch;
+  }
+
+  /* ---------- Tabs ---------- */
+  .tabs{
+    display:flex;
+    gap:2px;
+    margin-bottom:0;
+    border-bottom:1px solid var(--line);
+    overflow-x:auto;
+  }
+  .tab-btn{
+    background:none;
+    border:none;
+    border-bottom:2px solid transparent;
+    padding:10px 4px;
+    margin-right:22px;
+    cursor:pointer;
+    font-size:15px;
+    font-weight:500;
+    color:var(--ink-soft);
+    position:relative;
+    top:1px;
+    text-decoration:none;
+    white-space:nowrap;
+  }
+  .tab-btn:hover{ color:var(--ink); }
+  .tab-btn.active{
+    color:var(--herb-dark);
+    border-bottom-color:var(--herb);
+  }
+
+  .view{ padding-top:26px; }
+  .view[hidden]{ display:none; }
+
+  /* ---------- Card (recipe-box motif) ---------- */
+  .card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    position:relative;
+    padding:20px 22px;
+  }
+  .card::before{
+    /* punch-hole, like an index card */
+    content:"";
+    position:absolute;
+    top:14px;
+    left:14px;
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:var(--paper);
+    border:1px solid var(--line);
+  }
+  .card + .card{ margin-top:14px; }
+
+  /* ---------- Recipes list ---------- */
+  .list-toolbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:16px;
+    gap:12px;
+  }
+  .list-toolbar h2{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:20px;
+    margin:0;
+  }
+  .btn{
+    border:1px solid transparent;
+    padding:9px 16px;
+    cursor:pointer;
+    font-weight:500;
+    line-height:1;
+  }
+  .btn-primary{ background:var(--herb); color:#fff; }
+  .btn-primary:hover{ background:var(--herb-dark); }
+  .btn-secondary{ background:transparent; border-color:var(--line); color:var(--ink); }
+  .btn-secondary:hover{ border-color:var(--ink-soft); }
+  .btn-danger{ background:transparent; border-color:var(--alert); color:var(--alert); }
+  .btn-danger:hover{ background:var(--alert); color:#fff; }
+  .btn-small{ padding:6px 10px; font-size:13px; }
+  .btn[disabled]{ opacity:.45; cursor:not-allowed; }
+
+  .recipe-card{
+    display:block;
+    padding-left:32px;
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .recipe-card:hover{ border-color:var(--ink-soft); }
+  .recipe-card-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:12px;
+  }
+  .recipe-name{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:18px;
+    margin:0 0 4px;
+  }
+  .recipe-meta{
+    color:var(--ink-soft);
+    font-size:13px;
+  }
+  .badge{
+    display:inline-block;
+    font-size:12px;
+    font-weight:600;
+    padding:3px 9px;
+    white-space:nowrap;
+    border:1px solid transparent;
+  }
+  .badge-ok{ color:var(--herb-dark); border-color:var(--herb); background:#EAF0E6; }
+  .badge-missing{ color:var(--alert-dark); border-color:var(--alert); background:#F7E9E7; }
+
+  .empty-state{
+    padding:32px 22px;
+    text-align:left;
+    color:var(--ink-soft);
+  }
+  .empty-state strong{ display:block; color:var(--ink); font-family:"Fraunces", serif; font-size:17px; margin-bottom:4px; font-weight:600; }
+
+  /* ---------- Recipe detail ---------- */
+  .field-row{
+    display:flex;
+    gap:16px;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+  }
+  .field{ flex:1; min-width:140px; }
+  .field label{
+    display:block;
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-bottom:5px;
+  }
+  .field input, .field select{
+    width:100%;
+    border:1px solid var(--line);
+    background:var(--paper);
+    padding:9px 10px;
+    font-family:inherit;
+    font-size:14px;
+    color:var(--ink);
+  }
+  .field input:focus, .field select:focus{ background:#fff; }
+
+  /* ---------- Sign-in ---------- */
+  .user-bar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .user-bar[hidden]{ display:none; }
+  .user-bar strong{ color:var(--ink); font-weight:600; }
+  .login-card{ max-width:380px; padding-left:32px; }
+  .login-title{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:20px;
+    margin:0 0 16px;
+  }
+  .form-error{ color:var(--alert-dark); font-size:13px; margin:0 0 12px; }
+  .login-hint{ font-size:12px; color:var(--ink-soft); margin:16px 0 0; }
+
+  .section-label{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:15px;
+    margin:22px 0 10px;
+    padding-top:14px;
+    border-top:1px dashed var(--line);
+  }
+  .section-label:first-of-type{ border-top:none; padding-top:0; margin-top:6px; }
+
+  .ingredient-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:8px 0;
+    border-bottom:1px dotted var(--line);
+  }
+  .ingredient-row:last-of-type{ border-bottom:none; }
+  .ingredient-name{
+    flex:1 1 auto;
+    font-weight:500;
+  }
+  .ingredient-leader{
+    flex:1 1 auto;
+    border-bottom:1px dotted var(--line);
+    margin:0 8px;
+    min-width:20px;
+    align-self:flex-end;
+    height:0;
+  }
+  .ingredient-qty{ display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .ingredient-qty input{
+    width:60px;
+    border:1px solid var(--line);
+    background:var(--paper);
+    padding:6px 8px;
+    text-align:right;
+    font-family:inherit;
+  }
+  .ingredient-unit{ color:var(--ink-soft); font-size:13px; min-width:36px; }
+  .icon-btn{
+    background:none;
+    border:none;
+    color:var(--ink-soft);
+    cursor:pointer;
+    padding:4px 6px;
+    font-size:15px;
+    line-height:1;
+  }
+  .icon-btn:hover{ color:var(--alert); }
+
+  .add-ingredient{
+    display:flex;
+    gap:8px;
+    margin-top:12px;
+    flex-wrap:wrap;
+  }
+  .add-ingredient select{
+    flex:1;
+    min-width:140px;
+    border:1px solid var(--line);
+    background:var(--paper);
+    padding:8px 10px;
+    font-family:inherit;
+  }
+  .add-ingredient input{
+    width:80px;
+    border:1px solid var(--line);
+    background:var(--paper);
+    padding:8px 10px;
+    font-family:inherit;
+  }
+
+  .missing-panel{
+    margin-top:18px;
+    padding:14px 16px;
+    border:1px solid var(--line);
+    background:var(--paper);
+  }
+  .missing-panel.has-gap{ border-color:var(--alert); background:#FBF1EF; }
+  .missing-panel.all-good{ border-color:var(--herb); background:#EFF4EC; }
+  .missing-title{
+    font-weight:600;
+    font-size:13px;
+    margin-bottom:6px;
+  }
+  .missing-list{ font-size:13px; color:var(--ink-soft); }
+  .missing-list li{ margin-bottom:2px; }
+
+  .detail-actions{
+    display:flex;
+    justify-content:space-between;
+    margin-top:24px;
+    padding-top:16px;
+    border-top:1px solid var(--line);
+  }
+  .detail-actions .right{ display:flex; gap:8px; }
+
+  /* ---------- Pantry ---------- */
+  .pantry-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:9px 0;
+    border-bottom:1px dotted var(--line);
+  }
+  .pantry-row:last-of-type{ border-bottom:none; }
+  .pantry-name{ flex:1; font-weight:500; }
+  .pantry-name small{ display:block; color:var(--ink-soft); font-weight:400; font-size:12px; }
+  .pantry-qty{ display:flex; align-items:center; gap:6px; }
+  .pantry-qty input{
+    width:70px;
+    border:1px solid var(--line);
+    background:var(--paper);
+    padding:6px 8px;
+    text-align:right;
+    font-family:inherit;
+  }
+
+  .toast{
+    position:fixed;
+    bottom:22px;
+    left:50%;
+    transform:translateX(-50%) translateY(0);
+    background:var(--ink);
+    color:#fff;
+    padding:10px 18px;
+    font-size:13px;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-6px); }
+
+  .status-line{
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-top:6px;
+  }
+  .status-dot{
+    display:inline-block;
+    width:7px; height:7px;
+    border-radius:50%;
+    background:var(--spice);
+    margin-right:6px;
+    position:relative;
+    top:-1px;
+  }
+  .status-dot.live{ background:var(--herb); }
+  .status-dot.offline{ background:var(--alert); }
+  .status-sep{ margin:0 8px; color:var(--line); }
+
+  @media (prefers-reduced-motion: reduce){
+    .toast{ transition:none; }
+  }
+
+  @media (max-width:520px){
+    .shell{ padding:28px 16px 80px; }
+    .app-title{ font-size:28px; }
+    .ingredient-leader{ display:none; }
+    .field-row{ gap:12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <header class="app-header">
+    <div>
+      <h1 class="app-title">Re<span>See</span>P</h1>
+      <p class="app-tagline">Keep your recipes and your pantry talking to each other.</p>
+    </div>
+    <div class="user-bar" id="userBar" hidden>
+      <span>Signed in as <strong id="userBarName"></strong> (<span id="userBarRole"></span>)</span>
+      <button class="btn btn-secondary btn-small" id="btnSignOut">Sign out</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="mainNav" aria-label="Sections" hidden>
+    <a class="tab-btn active" href="#/recipes" data-route="recipes" aria-current="page">Recipes</a>
+    <a class="tab-btn" href="#/pantry" data-route="pantry">Pantry</a>
+    <a class="tab-btn" href="#/plan" data-route="plan">Meal plan</a>
+    <a class="tab-btn" href="#/shopping" data-route="shopping">Shopping list</a>
+  </nav>
+
+  <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span><span class="status-sep">|</span><span class="status-dot" id="liveDot"></span><span id="liveStatusText" aria-live="polite">Live updates connecting…</span></p>
+
+  <!-- SIGN IN -->
+  <section class="view" id="view-login" hidden>
+    <div class="card login-card">
+      <h2 class="login-title">Sign in</h2>
+      <form id="loginForm" novalidate>
+        <div class="field-row">
+          <div class="field">
+            <label for="fUsername">Username</label>
+            <input type="text" id="fUsername" autocomplete="username" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="fPassword">Password</label>
+            <input type="password" id="fPassword" autocomplete="current-password" />
+          </div>
+        </div>
+        <p class="form-error" id="loginError" role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit" id="btnSignIn">Sign in</button>
+      </form>
+      <p class="login-hint">Test accounts: <code>cook</code> / <code>cook123</code> (Cook) and <code>shopper</code> / <code>shop123</code> (Shopper).</p>
+    </div>
+  </section>
+
+  <!-- RECIPES LIST -->
+  <section class="view" id="view-recipes" hidden>
+    <div class="list-toolbar">
+      <h2>Your recipes</h2>
+      <button class="btn btn-primary" id="btnNewRecipe">+ New recipe</button>
+    </div>
+    <div id="recipeList"></div>
+  </section>
+
+  <!-- RECIPE DETAIL -->
+  <section class="view" id="view-detail" hidden>
+    <div class="list-toolbar">
+      <h2 id="detailHeading">Recipe</h2>
+      <button class="btn btn-secondary" id="btnBackToList">Back to recipes</button>
+    </div>
+    <div class="card" id="detailCard" style="padding-left:22px;">
+      <div class="field-row">
+        <div class="field">
+          <label for="fRecipeName">Title</label>
+          <input type="text" id="fRecipeName" placeholder="e.g. Weeknight tomato basil pasta" />
+        </div>
+        <div class="field" style="max-width:120px;">
+          <label for="fRecipeServings">Servings</label>
+          <input type="number" id="fRecipeServings" min="1" value="2" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="fRecipeNotes">Notes (optional)</label>
+          <input type="text" id="fRecipeNotes" placeholder="e.g. Quick midweek dinner" />
+        </div>
+      </div>
+
+      <h3 class="section-label">Ingredients</h3>
+      <div id="ingredientRows"></div>
+      <div class="add-ingredient">
+        <select id="addIngredientSelect"></select>
+        <input type="number" id="addIngredientQty" placeholder="Qty" min="0" step="0.5" />
+        <button class="btn btn-secondary btn-small" id="btnAddIngredient">Add</button>
+      </div>
+      <button class="btn btn-secondary btn-small" id="btnShowNewIngredient" style="margin-top:10px;">+ New ingredient</button>
+      <div class="add-ingredient" id="newIngredientForm" hidden style="margin-top:10px;">
+        <input type="text" id="newRecipeIngredientName" placeholder="Ingredient name" style="flex:1; min-width:140px;" />
+        <input type="text" id="newRecipeIngredientUnit" placeholder="unit" style="width:70px;" />
+        <input type="number" id="newRecipeIngredientQty" placeholder="Qty" min="0" step="0.5" />
+        <button class="btn btn-secondary btn-small" id="btnConfirmNewIngredient">Add to pantry &amp; recipe</button>
+        <button class="btn btn-secondary btn-small" id="btnCancelNewIngredient">Cancel</button>
+      </div>
+
+      <div class="missing-panel" id="missingPanel">
+        <div class="missing-title" id="missingTitle">What's missing</div>
+        <ul class="missing-list" id="missingList"></ul>
+      </div>
+
+      <div class="detail-actions">
+        <button class="btn btn-danger" id="btnDeleteRecipe">Delete recipe</button>
+        <div class="right">
+          <button class="btn btn-secondary" id="btnCancelDetail">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveRecipe">Save recipe</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PANTRY -->
+  <section class="view" id="view-pantry" hidden>
+    <div class="list-toolbar">
+      <h2>Pantry</h2>
+    </div>
+    <div class="card" id="pantryCard" style="padding-left:22px;">
+      <div id="pantryRows"></div>
+      <div class="add-ingredient">
+        <input type="text" id="newIngredientName" placeholder="New ingredient name" style="flex:1; min-width:140px;" />
+        <input type="text" id="newIngredientUnit" placeholder="unit" style="width:70px;" />
+        <input type="number" id="newIngredientQty" placeholder="Qty" min="0" step="0.5" />
+        <button class="btn btn-secondary btn-small" id="btnAddPantryItem">Add to pantry</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- MEAL PLAN (filled in once the plan endpoint exists) -->
+  <section class="view" id="view-plan" hidden>
+    <div class="list-toolbar">
+      <h2>Meal plan</h2>
+    </div>
+    <div class="card empty-state">
+      <strong>Nothing planned yet</strong>
+      Planning a recipe will add anything your pantry is short on to the shopping list.
+    </div>
+  </section>
+
+  <!-- SHOPPING LIST (filled in once the shopping endpoints exist) -->
+  <section class="view" id="view-shopping" hidden>
+    <div class="list-toolbar">
+      <h2>Shopping list</h2>
+    </div>
+    <div class="card empty-state">
+      <strong>The shopping list is empty</strong>
+      Items appear here when a planned recipe needs something the pantry doesn't have.
+    </div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+   ReSeeP frontend client
+   -------------------------------------------------------------------------
+   This page is written to talk to a JAX-RS backend on Payara through the
+   endpoints below. Point API_BASE at your deployed service, e.g.
+   "http://localhost:8080/reseep/api". Until that backend exists (or if a
+   request fails), the app falls back to the in-memory MOCK data so the UI
+   is fully clickable on its own.
+
+   REST resources (Option A: JAX-RS on Payara, MySQL via JPA):
+     GET    {API_BASE}/recipes            -> list of recipes (with items[])
+     GET    {API_BASE}/recipes/{id}       -> one recipe
+     POST   {API_BASE}/recipes            -> create a recipe
+     PUT    {API_BASE}/recipes/{id}       -> update a recipe (replaces items)
+     DELETE {API_BASE}/recipes/{id}       -> delete a recipe
+     GET    {API_BASE}/pantry             -> list of ingredients + qty on hand
+     POST   {API_BASE}/pantry             -> add a new pantry ingredient
+     PUT    {API_BASE}/pantry/{id}        -> update quantity on hand
+
+   Data shapes (match RecipeDto / IngredientDto on the backend):
+     Recipe   { id, name, servings, notes, items: [{ ingredientId, qty }] }
+     Pantry   { id, name, unit, qtyOnHand }
+   ========================================================================= */
+
+const API_BASE = "http://localhost:8080/reseep/api"; // Payara base URL
+
+let usingLiveApi = false;
+
+// ---- Mock data (used until the real API is reachable) -------------------
+let mockIngredients = [
+  { id: "ing1", name: "Spaghetti",      unit: "g",   qtyOnHand: 400 },
+  { id: "ing2", name: "Tomato",         unit: "pc",  qtyOnHand: 2 },
+  { id: "ing3", name: "Basil",          unit: "g",   qtyOnHand: 0 },
+  { id: "ing4", name: "Garlic",         unit: "clove", qtyOnHand: 6 },
+  { id: "ing5", name: "Rice",           unit: "g",   qtyOnHand: 500 },
+  { id: "ing6", name: "Egg",            unit: "pc",  qtyOnHand: 3 },
+  { id: "ing7", name: "Soy sauce",      unit: "tbsp", qtyOnHand: 0 },
+  { id: "ing8", name: "Ground beef",    unit: "g",   qtyOnHand: 0 },
+  { id: "ing9", name: "Kidney beans",   unit: "can", qtyOnHand: 2 },
+  { id: "ing10", name: "Chili powder",  unit: "tsp", qtyOnHand: 4 }
+];
+
+let mockRecipes = [
+  {
+    id: "r1", name: "Tomato basil pasta", servings: 2, notes: "Quick midweek dinner",
+    items: [
+      { ingredientId: "ing1", qty: 200 },
+      { ingredientId: "ing2", qty: 3 },
+      { ingredientId: "ing3", qty: 10 },
+      { ingredientId: "ing4", qty: 2 }
+    ]
+  },
+  {
+    id: "r2", name: "Pantry fried rice", servings: 3, notes: "Good for leftovers",
+    items: [
+      { ingredientId: "ing5", qty: 300 },
+      { ingredientId: "ing6", qty: 2 },
+      { ingredientId: "ing7", qty: 2 }
+    ]
+  },
+  {
+    id: "r3", name: "Weeknight chili", servings: 4, notes: "",
+    items: [
+      { ingredientId: "ing8", qty: 400 },
+      { ingredientId: "ing9", qty: 2 },
+      { ingredientId: "ing10", qty: 3 }
+    ]
+  }
+];
+
+// ---- Thin API layer: tries the real backend, falls back to mock --------
+async function apiRequest(path, options = {}) {
+  const res = await fetch(API_BASE + path, {
+    headers: { "Content-Type": "application/json" },
+    ...options
+  });
+  if (!res.ok) {
+    // Prefer the server's own {"error": "..."} message, and keep the status
+    // so callers can tell "server said no" (4xx) from "server unreachable".
+    let message = "Request failed: " + res.status;
+    try {
+      const body = await res.json();
+      if (body && body.error) message = body.error;
+    } catch (e) { /* not JSON */ }
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function loadRecipes() {
+  try {
+    const data = await apiRequest("/recipes");
+    usingLiveApi = true;
+    return data;
+  } catch (e) {
+    usingLiveApi = false;
+    return mockRecipes;
+  }
+}
+
+async function loadPantry() {
+  try {
+    const data = await apiRequest("/pantry");
+    usingLiveApi = true;
+    return data;
+  } catch (e) {
+    usingLiveApi = false;
+    return mockIngredients;
+  }
+}
+
+async function saveRecipeApi(recipe) {
+  try {
+    if (recipe.id && !recipe.id.toString().startsWith("new-")) {
+      return await apiRequest(`/recipes/${recipe.id}`, { method: "PUT", body: JSON.stringify(recipe) });
+    } else {
+      // recipe.id is a temporary client-side placeholder like "new-172..."
+      // at this point — the backend assigns the real numeric id, so leave
+      // it out of the payload entirely rather than sending a non-numeric
+      // string into a Long field.
+      const { id, ...payload } = recipe;
+      return await apiRequest("/recipes", { method: "POST", body: JSON.stringify(payload) });
+    }
+  } catch (e) {
+    return null; // falls back to local mutation of mock data
+  }
+}
+
+async function deleteRecipeApi(id) {
+  try {
+    await apiRequest(`/recipes/${id}`, { method: "DELETE" });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function savePantryItemApi(item) {
+  try {
+    await apiRequest(`/pantry/${item.id}`, { method: "PUT", body: JSON.stringify(item) });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function createPantryItemApi(item) {
+  try {
+    const created = await apiRequest("/pantry", { method: "POST", body: JSON.stringify(item) });
+    return created; // server-assigned id + the saved fields
+  } catch (e) {
+    return null; // caller falls back to a local-only id
+  }
+}
+
+// ---- App state ------------------------------------------------------------
+let recipes = [];
+let ingredients = [];
+let currentRecipe = null; // recipe object being edited, or null
+
+const el = (id) => document.getElementById(id);
+
+function findIngredient(id) {
+  return ingredients.find((i) => i.id === id);
+}
+
+function showToast(msg) {
+  const t = el("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// ---- Sign-in and roles -----------------------------------------------------
+//   POST {API_BASE}/login  { username, password }  ->  { id, username, role }
+// role is "COOK" or "SHOPPER". Until the backend has /login (404) or if the
+// server is unreachable, the test accounts below are used instead so the web
+// client can be built and demoed. A 400/401 from a real server is final.
+//
+// Hiding views by role is a convenience for the user, not security: the API
+// must check the role itself before allowing a write.
+const MOCK_USERS = [
+  { id: 1, username: "cook", password: "cook123", role: "COOK" },
+  { id: 2, username: "shopper", password: "shop123", role: "SHOPPER" },
+];
+const ROLE_VIEWS = {
+  COOK: ["recipes", "pantry", "plan", "shopping"],
+  SHOPPER: ["shopping", "pantry"],
+};
+const ROLE_LABELS = { COOK: "Cook", SHOPPER: "Shopper" };
+const SESSION_KEY = "reseep.user";
+
+let currentUser = loadSessionUser();
+let pendingRoute = null; // where a signed-out user was heading
+
+function loadSessionUser() {
+  try {
+    const user = JSON.parse(sessionStorage.getItem(SESSION_KEY));
+    return user && ROLE_VIEWS[user.role] ? user : null;
+  } catch (e) {
+    return null; // storage blocked or corrupt: just sign in again
+  }
+}
+
+function saveSessionUser(user) {
+  try {
+    if (user) sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    else sessionStorage.removeItem(SESSION_KEY);
+  } catch (e) { /* storage blocked: stays signed in until reload */ }
+}
+
+async function loginApi(username, password) {
+  try {
+    return await apiRequest("/login", { method: "POST", body: JSON.stringify({ username, password }) });
+  } catch (e) {
+    if (e.status && e.status !== 404) throw e;
+    const match = MOCK_USERS.find((u) => u.username === username && u.password === password);
+    if (!match) {
+      const err = new Error("Invalid username or password.");
+      err.status = 401;
+      throw err;
+    }
+    const { password: _ignored, ...user } = match;
+    return { ...user, mock: true };
+  }
+}
+
+function canView(view) {
+  return !!currentUser && ROLE_VIEWS[currentUser.role].includes(view);
+}
+
+function defaultRoute() {
+  return "#/" + ROLE_VIEWS[currentUser.role][0];
+}
+
+function updateUserBar() {
+  el("userBar").hidden = !currentUser;
+  el("mainNav").hidden = !currentUser;
+  if (!currentUser) return;
+  el("userBarName").textContent = currentUser.username;
+  el("userBarRole").textContent = ROLE_LABELS[currentUser.role];
+  document.querySelectorAll(".tab-btn").forEach((tab) => {
+    tab.hidden = !canView(tab.dataset.route);
+  });
+}
+
+function showLoginError(message) {
+  el("loginError").textContent = message || "";
+  el("loginError").hidden = !message;
+}
+
+el("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = el("fUsername").value.trim();
+  const password = el("fPassword").value;
+  if (!username || !password) {
+    showLoginError("Enter your username and password.");
+    (username ? el("fPassword") : el("fUsername")).focus();
+    return;
+  }
+
+  el("btnSignIn").disabled = true;
+  try {
+    const user = await loginApi(username, password);
+    user.role = String(user.role).toUpperCase();
+    if (!ROLE_VIEWS[user.role]) throw new Error("This account has no access to the web app.");
+
+    currentUser = user;
+    saveSessionUser(user);
+    el("loginForm").reset();
+    showLoginError(null);
+    updateUserBar();
+    showToast(`Signed in as ${user.username}` + (user.mock ? " (test account — no login server yet)" : ""));
+
+    const target = pendingRoute && canView(routeView(pendingRoute)) ? pendingRoute : defaultRoute();
+    pendingRoute = null;
+    navigate(target);
+  } catch (err) {
+    showLoginError(err.status ? err.message : "Couldn't reach the server: " + err.message);
+  } finally {
+    el("btnSignIn").disabled = false;
+  }
+});
+
+el("btnSignOut").addEventListener("click", () => {
+  currentUser = null;
+  saveSessionUser(null);
+  updateUserBar();
+  showToast("Signed out");
+  navigate("#/login");
+});
+
+// ---- Routing ---------------------------------------------------------------
+// Each view has its own URL hash so it can be linked, bookmarked and reloaded:
+//   #/login            sign in (the only view while signed out)
+//   #/recipes          recipe list
+//   #/recipes/new      new recipe
+//   #/recipes/{id}     edit a recipe
+//   #/pantry           pantry
+//   #/plan             meal plan
+//   #/shopping         shopping list
+// Which of these a user can open depends on their role (ROLE_VIEWS).
+const TOP_LEVEL_VIEWS = ["recipes", "pantry", "plan", "shopping"];
+
+function showView(name) {
+  ["login", ...TOP_LEVEL_VIEWS, "detail"].forEach((v) => {
+    el("view-" + v).hidden = (v !== name);
+  });
+}
+
+function routeView(hash) {
+  return hash.replace(/^#\/?/, "").split("/")[0];
+}
+
+function setActiveTab(route) {
+  document.querySelectorAll(".tab-btn").forEach((tab) => {
+    const active = tab.dataset.route === route;
+    tab.classList.toggle("active", active);
+    if (active) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  });
+}
+
+function navigate(hash) {
+  if (location.hash === hash) router(); // same hash fires no hashchange
+  else location.hash = hash;
+}
+
+function router() {
+  const [view, param] = location.hash.replace(/^#\/?/, "").split("/");
+
+  if (!currentUser) {
+    if (view !== "login") pendingRoute = location.hash; // come back here after signing in
+    history.replaceState(null, "", "#/login");
+    currentRecipe = null;
+    setActiveTab(null);
+    showView("login");
+    el("fUsername").focus();
+    return;
+  }
+
+  if (view === "login" || !TOP_LEVEL_VIEWS.includes(view)) {
+    history.replaceState(null, "", defaultRoute()); // already signed in, or unknown/empty hash
+    router();
+    return;
+  }
+
+  if (!canView(view)) {
+    showToast(`The ${ROLE_LABELS[currentUser.role]} role can't open that page`);
+    history.replaceState(null, "", defaultRoute());
+    router();
+    return;
+  }
+
+  if (view === "recipes" && param) {
+    const found = param === "new" ? openNewRecipe() : openRecipeDetail(normalizeId(param));
+    if (!found) {
+      showToast("That recipe doesn't exist");
+      navigate("#/recipes");
+      return;
+    }
+    setActiveTab("recipes");
+    showView("detail");
+    return;
+  }
+
+  currentRecipe = null; // leaving the editor discards unsaved changes, as before
+  setActiveTab(view);
+  showView(view);
+}
+
+window.addEventListener("hashchange", router);
+
+// ---- Rendering: recipe list --------------------------------------------
+function missingForRecipe(recipe) {
+  const missing = [];
+  recipe.items.forEach((item) => {
+    const ing = findIngredient(item.ingredientId);
+    if (!ing) return;
+    if (ing.qtyOnHand < item.qty) {
+      missing.push({ name: ing.name, short: item.qty - ing.qtyOnHand, unit: ing.unit });
+    }
+  });
+  return missing;
+}
+
+function renderRecipeList() {
+  const container = el("recipeList");
+  container.innerHTML = "";
+
+  if (recipes.length === 0) {
+    container.innerHTML = `
+      <div class="card empty-state">
+        <strong>No recipes yet</strong>
+        Add your first recipe to start tracking what it needs from your pantry.
+      </div>`;
+    return;
+  }
+
+  recipes.forEach((recipe) => {
+    const missing = missingForRecipe(recipe);
+    const card = document.createElement("a");
+    card.className = "card recipe-card";
+    card.href = `#/recipes/${encodeURIComponent(recipe.id)}`;
+    card.innerHTML = `
+      <div class="recipe-card-top">
+        <div>
+          <p class="recipe-name">${escapeHtml(recipe.name)}</p>
+          <p class="recipe-meta">${recipe.items.length} ingredient${recipe.items.length === 1 ? "" : "s"} · serves ${recipe.servings}</p>
+        </div>
+        ${missing.length === 0
+          ? `<span class="badge badge-ok">Ready to cook</span>`
+          : `<span class="badge badge-missing">${missing.length} missing</span>`}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str ?? "";
+  return d.innerHTML;
+}
+
+// ---- Recipe detail view --------------------------------------------------
+// Called by the router; returns false if there's no such recipe.
+function openRecipeDetail(id) {
+  const recipe = recipes.find((r) => r.id === id);
+  if (!recipe) return false;
+  currentRecipe = JSON.parse(JSON.stringify(recipe)); // work on a copy
+  renderDetail(false);
+  return true;
+}
+
+function openNewRecipe() {
+  currentRecipe = { id: "new-" + Date.now(), name: "", servings: 2, notes: "", items: [] };
+  renderDetail(true);
+  return true;
+}
+
+function renderDetail(isNew) {
+  el("detailHeading").textContent = isNew ? "New recipe" : "Edit recipe";
+  el("fRecipeName").value = currentRecipe.name;
+  el("fRecipeServings").value = currentRecipe.servings;
+  el("fRecipeNotes").value = currentRecipe.notes || "";
+  el("btnDeleteRecipe").style.visibility = isNew ? "hidden" : "visible";
+
+  renderIngredientRows();
+  renderAddIngredientSelect();
+  renderMissingPanel();
+  hideNewIngredientForm();
+}
+
+function renderIngredientRows() {
+  const container = el("ingredientRows");
+  container.innerHTML = "";
+
+  if (currentRecipe.items.length === 0) {
+    container.innerHTML = `<p class="recipe-meta" style="padding:6px 0;">No ingredients added yet.</p>`;
+    return;
+  }
+
+  currentRecipe.items.forEach((item, idx) => {
+    const ing = findIngredient(item.ingredientId);
+    if (!ing) return;
+    const row = document.createElement("div");
+    row.className = "ingredient-row";
+    row.innerHTML = `
+      <span class="ingredient-name">${escapeHtml(ing.name)}</span>
+      <span class="ingredient-leader"></span>
+      <span class="ingredient-qty">
+        <input type="number" min="0" step="0.5" value="${item.qty}" data-idx="${idx}" class="qtyInput" />
+        <span class="ingredient-unit">${escapeHtml(ing.unit)}</span>
+        <button class="icon-btn" title="Remove" data-idx="${idx}">✕</button>
+      </span>
+    `;
+    container.appendChild(row);
+  });
+
+  container.querySelectorAll(".qtyInput").forEach((input) => {
+    input.addEventListener("input", (e) => {
+      const idx = Number(e.target.dataset.idx);
+      currentRecipe.items[idx].qty = Number(e.target.value) || 0;
+      renderMissingPanel();
+    });
+  });
+  container.querySelectorAll(".icon-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.target.dataset.idx);
+      currentRecipe.items.splice(idx, 1);
+      renderIngredientRows();
+      renderAddIngredientSelect();
+      renderMissingPanel();
+    });
+  });
+}
+
+function renderAddIngredientSelect() {
+  const select = el("addIngredientSelect");
+  const usedIds = new Set(currentRecipe.items.map((i) => i.ingredientId));
+  const available = ingredients.filter((i) => !usedIds.has(i.id));
+  select.innerHTML = available.length
+    ? available.map((i) => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("")
+    : `<option value="">All ingredients added</option>`;
+}
+
+el("btnAddIngredient").addEventListener("click", () => {
+  const select = el("addIngredientSelect");
+  const qtyInput = el("addIngredientQty");
+  const ingId = select.value;
+  if (!ingId) return;
+  const qty = Number(qtyInput.value) || 1;
+  currentRecipe.items.push({ ingredientId: normalizeId(ingId), qty });
+  qtyInput.value = "";
+  renderIngredientRows();
+  renderAddIngredientSelect();
+  renderMissingPanel();
+});
+
+// An id from the backend is a number (Long); an id made up locally before a
+// server exists is a string like "ing1". Keep whichever form it already is.
+function normalizeId(id) {
+  return /^\d+$/.test(id) ? Number(id) : id;
+}
+
+// ---- New ingredient, added from inside the recipe editor -----------------
+el("btnShowNewIngredient").addEventListener("click", () => {
+  el("newIngredientForm").hidden = false;
+  el("btnShowNewIngredient").hidden = true;
+  el("newRecipeIngredientName").focus();
+});
+
+el("btnCancelNewIngredient").addEventListener("click", () => {
+  hideNewIngredientForm();
+});
+
+function hideNewIngredientForm() {
+  el("newIngredientForm").hidden = true;
+  el("btnShowNewIngredient").hidden = false;
+  el("newRecipeIngredientName").value = "";
+  el("newRecipeIngredientUnit").value = "";
+  el("newRecipeIngredientQty").value = "";
+}
+
+el("btnConfirmNewIngredient").addEventListener("click", async () => {
+  const nameInput = el("newRecipeIngredientName");
+  const unitInput = el("newRecipeIngredientUnit");
+  const qtyInput = el("newRecipeIngredientQty");
+
+  const name = nameInput.value.trim();
+  if (!name) {
+    showToast("Give the ingredient a name first");
+    nameInput.focus();
+    return;
+  }
+  if (ingredients.some((i) => i.name.toLowerCase() === name.toLowerCase())) {
+    showToast("That ingredient is already in your pantry — pick it from the list above");
+    return;
+  }
+
+  const recipeQty = Number(qtyInput.value) || 1;
+  const newPantryItem = {
+    name,
+    unit: unitInput.value.trim() || "unit",
+    qtyOnHand: 0 // it's new, so assume none on hand yet — edit it from the Pantry tab once you actually have some
+  };
+
+  const created = await createPantryItemApi(newPantryItem);
+  const ingredient = created || { id: "ing" + Date.now(), ...newPantryItem };
+  ingredients.push(ingredient);
+
+  currentRecipe.items.push({ ingredientId: normalizeId(ingredient.id), qty: recipeQty });
+
+  hideNewIngredientForm();
+  renderIngredientRows();
+  renderAddIngredientSelect();
+  renderMissingPanel();
+  showToast(created ? "Ingredient added to pantry and recipe" : "Added locally (no server connected)");
+});
+
+function renderMissingPanel() {
+  const panel = el("missingPanel");
+  const list = el("missingList");
+  const missing = missingForRecipe(currentRecipe);
+
+  list.innerHTML = "";
+  if (currentRecipe.items.length === 0) {
+    panel.className = "missing-panel";
+    el("missingTitle").textContent = "What's missing";
+    list.innerHTML = `<li>Add ingredients to see what your pantry is short on.</li>`;
+    return;
+  }
+
+  if (missing.length === 0) {
+    panel.className = "missing-panel all-good";
+    el("missingTitle").textContent = "You have everything for this recipe";
+  } else {
+    panel.className = "missing-panel has-gap";
+    el("missingTitle").textContent = "What's missing";
+    missing.forEach((m) => {
+      const li = document.createElement("li");
+      li.textContent = `${m.name} — short ${m.short} ${m.unit}`;
+      list.appendChild(li);
+    });
+  }
+}
+
+el("btnNewRecipe").addEventListener("click", () => navigate("#/recipes/new"));
+el("btnBackToList").addEventListener("click", backToRecipes);
+el("btnCancelDetail").addEventListener("click", backToRecipes);
+
+function backToRecipes() {
+  navigate("#/recipes");
+}
+
+el("btnSaveRecipe").addEventListener("click", async () => {
+  const name = el("fRecipeName").value.trim();
+  if (!name) {
+    showToast("Give the recipe a title before saving");
+    el("fRecipeName").focus();
+    return;
+  }
+  currentRecipe.name = name;
+  currentRecipe.servings = Math.max(1, Number(el("fRecipeServings").value) || 1);
+  currentRecipe.notes = el("fRecipeNotes").value.trim();
+
+  const isNew = currentRecipe.id.toString().startsWith("new-");
+  const saved = await saveRecipeApi(currentRecipe);
+
+  if (saved) {
+    currentRecipe.id = saved.id; // adopt the real database id (critical for a brand-new recipe)
+  } else if (isNew) {
+    currentRecipe.id = "r" + Date.now(); // local-only placeholder, no server reachable
+  }
+
+  if (isNew) {
+    recipes.push(currentRecipe);
+  } else {
+    const i = recipes.findIndex((r) => r.id === currentRecipe.id);
+    recipes[i] = currentRecipe;
+  }
+
+  showToast(saved ? "Recipe saved" : "Recipe saved locally (no server connected)");
+  renderRecipeList();
+  backToRecipes();
+});
+
+el("btnDeleteRecipe").addEventListener("click", async () => {
+  if (!confirm(`Delete "${currentRecipe.name}"? This can't be undone.`)) return;
+  const deletedOnServer = await deleteRecipeApi(currentRecipe.id);
+  recipes = recipes.filter((r) => r.id !== currentRecipe.id);
+  showToast(deletedOnServer ? "Recipe deleted" : "Recipe deleted locally (no server connected)");
+  renderRecipeList();
+  backToRecipes();
+});
+
+// ---- Pantry view -----------------------------------------------------------
+function renderPantry() {
+  const container = el("pantryRows");
+  container.innerHTML = "";
+
+  if (ingredients.length === 0) {
+    container.innerHTML = `<p class="recipe-meta" style="padding:6px 0;">Your pantry is empty.</p>`;
+    return;
+  }
+
+  ingredients.forEach((ing) => {
+    const row = document.createElement("div");
+    row.className = "pantry-row";
+    row.innerHTML = `
+      <span class="pantry-name">${escapeHtml(ing.name)}<small>${escapeHtml(ing.unit)}</small></span>
+      <span class="pantry-qty">
+        <input type="number" min="0" step="0.5" value="${ing.qtyOnHand}" data-id="${ing.id}" class="pantryQtyInput" />
+      </span>
+    `;
+    container.appendChild(row);
+  });
+
+  container.querySelectorAll(".pantryQtyInput").forEach((input) => {
+    input.addEventListener("change", async (e) => {
+      const id = normalizeId(e.target.dataset.id); // dataset values are always strings; ingredient ids from the backend are numbers
+      const ing = findIngredient(id);
+      if (!ing) return; // shouldn't happen, but avoid crashing on a stale row
+      ing.qtyOnHand = Number(e.target.value) || 0;
+      const savedOnServer = await savePantryItemApi(ing);
+      showToast(savedOnServer ? "Pantry updated" : "Updated locally (no server connected)");
+      renderRecipeList(); // missing-ingredient badges may have changed
+    });
+  });
+}
+
+el("btnAddPantryItem").addEventListener("click", async () => {
+  const nameInput = el("newIngredientName");
+  const unitInput = el("newIngredientUnit");
+  const qtyInput = el("newIngredientQty");
+  const name = nameInput.value.trim();
+  if (!name) {
+    showToast("Give the ingredient a name first");
+    nameInput.focus();
+    return;
+  }
+
+  const newItem = {
+    name,
+    unit: unitInput.value.trim() || "unit",
+    qtyOnHand: Number(qtyInput.value) || 0
+  };
+
+  const created = await createPantryItemApi(newItem);
+  ingredients.push(created || { id: "ing" + Date.now(), ...newItem });
+
+  nameInput.value = "";
+  unitInput.value = "";
+  qtyInput.value = "";
+  renderPantry();
+  showToast(created ? "Added to pantry" : "Added locally (no server connected)");
+});
+
+// ---- Live updates (WebSocket) ----------------------------------------------
+// The server pushes a small {type, action, id} message after every committed
+// change to the pantry or recipes. We don't trust the message for data —
+// we just re-fetch over REST, so the API stays the single source of truth.
+// "http://host/reseep/api" -> "ws://host/reseep/ws/updates"
+const WS_URL = API_BASE.replace(/^http/, "ws").replace(/\/api\/?$/, "") + "/ws/updates";
+const MIN_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 10000;
+
+let reconnectDelay = MIN_RECONNECT_DELAY;
+let liveConnectedBefore = false;
+let refreshTimer = null;
+
+function setLiveStatus(state) {
+  const labels = {
+    live: "Live updates on",
+    reconnecting: `Live updates lost — retrying in ${Math.round(reconnectDelay / 1000)}s`,
+    disabled: "Live updates off (?live=off) — reload to see others' changes",
+  };
+  el("liveDot").className = "status-dot" + (state === "live" ? " live" : " offline");
+  el("liveStatusText").textContent = labels[state];
+}
+
+function connectLiveUpdates() {
+  const socket = new WebSocket(WS_URL);
+  window.liveSocket = socket; // lets you run liveSocket.close() in the console to test reconnects
+
+  socket.onopen = () => {
+    reconnectDelay = MIN_RECONNECT_DELAY;
+    setLiveStatus("live");
+    // Anything that changed while we were disconnected was never pushed to
+    // us, so reload the full current state. Also covers the case where the
+    // page booted on sample data because the server was down.
+    if (liveConnectedBefore || !usingLiveApi) {
+      refreshFromServer("Reconnected — showing latest data");
+    }
+    liveConnectedBefore = true;
+  };
+
+  socket.onmessage = (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    if (msg.type === "pantry-updated" || msg.type === "recipe-updated") {
+      scheduleRefresh();
+    }
+  };
+
+  // onerror is always followed by onclose, so retrying lives here only.
+  socket.onclose = () => {
+    setLiveStatus("reconnecting");
+    setTimeout(connectLiveUpdates, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+  };
+}
+
+// Several changes can land together (e.g. a recipe save that also added a
+// pantry item), so coalesce them into one refresh.
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => refreshFromServer(), 150);
+}
+
+async function refreshFromServer(toastMsg) {
+  try {
+    [recipes, ingredients] = await Promise.all([apiRequest("/recipes"), apiRequest("/pantry")]);
+    usingLiveApi = true;
+  } catch (e) {
+    return; // keep showing what we have; the socket will trigger another try
+  }
+  updateApiStatus();
+  renderRecipeList();
+  renderPantryKeepingFocus();
+
+  // If the recipe being edited was deleted by another user, say so rather
+  // than letting a later save fail with a confusing 404.
+  const editing = currentRecipe && !el("view-detail").hidden;
+  if (editing && !currentRecipe.id.toString().startsWith("new-")) {
+    if (!recipes.some((r) => r.id === currentRecipe.id)) {
+      showToast("This recipe was deleted by another user");
+      backToRecipes();
+      return;
+    }
+    renderMissingPanel(); // pantry quantities may have changed
+  }
+  if (toastMsg) showToast(toastMsg);
+}
+
+// Re-rendering the pantry rebuilds its inputs, which would kick the user out
+// of a box they're typing in. Put focus (and their unsaved value) back.
+function renderPantryKeepingFocus() {
+  const active = document.activeElement;
+  const focusedId = active && active.classList.contains("pantryQtyInput") ? active.dataset.id : null;
+  const typedValue = focusedId ? active.value : null;
+  renderPantry();
+  if (focusedId) {
+    const input = document.querySelector(`.pantryQtyInput[data-id="${focusedId}"]`);
+    if (input) { input.value = typedValue; input.focus(); }
+  }
+}
+
+// ---- Boot ------------------------------------------------------------------
+function updateApiStatus() {
+  el("apiDot").classList.toggle("live", usingLiveApi);
+  el("apiStatusText").textContent = usingLiveApi
+    ? `Connected to ${API_BASE}`
+    : `No server at ${API_BASE} — showing sample data`;
+}
+
+async function init() {
+  [recipes, ingredients] = await Promise.all([loadRecipes(), loadPantry()]);
+  updateApiStatus();
+  renderRecipeList();
+  renderPantry();
+  router(); // after loading, so #/recipes/{id} can find its recipe
+  // ?live=off runs the page on REST alone, to show it still works when the
+  // WebSocket is unavailable.
+  if (new URLSearchParams(location.search).get("live") === "off") {
+    setLiveStatus("disabled");
+  } else {
+    connectLiveUpdates();
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>

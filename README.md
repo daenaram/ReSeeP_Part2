@@ -83,6 +83,10 @@ automatically, since it'll find the `ingredient` table empty again.
 | GET    | `/api/pantry`       | List all pantry ingredients                    |
 | POST   | `/api/pantry`       | Add a new pantry ingredient                    |
 | PUT    | `/api/pantry/{id}`  | Update a pantry ingredient's quantity on hand  |
+| POST   | `/api/login`        | Sign in: `{ username, password }` → `{ id, username, role }` |
+| GET    | `/api/shopping`     | List all shopping list items (needed and bought) |
+| POST   | `/api/recipes/{id}/plan` | Work out what's missing for this recipe and add it to the shopping list. Body: `{ userId }` |
+| POST   | `/api/shopping/{id}/bought` | Mark an item bought. Body: `{ userId }`. Publishes an `ItemPurchased` event -- see "Message broker" below |
 
 All request/response bodies are JSON. Validation is intentionally simple:
 a blank recipe/ingredient name, a negative quantity, or an unknown
@@ -145,6 +149,106 @@ and, within a few seconds, the page reconnects on its own, shows
 catches up on missed changes, edit something with curl right after
 re-enabling, before the page's next retry fires.
 
+## Message broker (RabbitMQ)
+
+Marking a shopping item bought doesn't update the pantry directly. Instead,
+`ShoppingListService.markBought()` publishes an `ItemPurchased` event to
+RabbitMQ and returns immediately. A completely separate program --
+`reseep-consumer`, not part of this WAR and never deployed to Payara --
+picks that event up, adds the bought quantity to the pantry, writes a row
+to `purchase_log`, and tells this web app to push a live update to
+connected browsers. This is the "advanced integration" piece of the brief:
+two independently running services connected only by a queue, not a direct
+method call.
+
+### 1. Start RabbitMQ
+
+From the project root:
+
+```
+docker compose up -d
+```
+
+This starts RabbitMQ with its management UI at `http://localhost:15672`
+(login `reseep` / `reseep`), where you can watch the `item_purchased_queue`
+queue fill up and drain, and manually publish messages for the demo below.
+
+### 2. Make sure the web app can reach it
+
+No extra setup needed on the Payara side -- the RabbitMQ client library is
+bundled straight into `reseep.war` (unlike the MySQL driver, nothing goes
+into Payara's own `lib` folder). `EventPublisher` connects to
+`localhost:5672` by default and logs a warning (without crashing the app)
+if RabbitMQ isn't running yet.
+
+### 3. Run the consumer
+
+The consumer is a separate Maven project in `reseep-consumer/`. It needs
+its own database credentials as environment variables (never hardcode a
+password into source that gets committed):
+
+```
+cd reseep-consumer
+set DB_PASSWORD=your-aws-mysql-password      # PowerShell: $env:DB_PASSWORD="..."
+mvn exec:java
+```
+
+Leave this running in its own terminal window. You should see:
+
+```
+[Consumer] Waiting for ItemPurchased events on 'item_purchased_queue'. Ctrl+C to stop.
+```
+
+Other environment variables (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
+`RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`,
+`WEBAPP_BASE_URL`) all have sensible defaults matching this project's setup
+and only need overriding if yours differs.
+
+### 4. See it work end to end
+
+1. `POST /api/recipes/1/plan` with `{"userId":1}` to put something on the
+   shopping list.
+2. `POST /api/shopping/{id}/bought` with `{"userId":2}`.
+3. Watch the consumer's terminal -- within moments it logs the event being
+   received, the pantry being updated, and being acked.
+4. `GET /api/pantry` to confirm the ingredient's `qtyOnHand` went up by the
+   bought quantity.
+
+### Demonstrating failure and retry
+
+Stop the consumer, set the demo flag, and restart it:
+
+```
+set SIMULATE_FAILURE_ONCE=true
+mvn exec:java
+```
+
+Mark an item bought. The consumer logs a simulated failure and **nacks**
+the message with `requeue=true` instead of acking it -- watch the
+management UI's queue page and you'll see the message go back to "Ready"
+rather than disappearing. Because `SIMULATE_FAILURE_ONCE` only fires once
+(a one-shot flag per consumer run), RabbitMQ redelivers that same message a
+moment later, the consumer processes it normally this time, and the pantry
+updates. This demonstrates the brief's "failure triggers a retry"
+requirement concretely, on command, rather than relying on a real failure
+happening to occur during recording.
+
+### Demonstrating a duplicate/repeated event
+
+In the RabbitMQ management UI, open the `item_purchased_queue` queue and
+use "Publish message" to manually re-send the **exact same JSON** the
+consumer already processed earlier (copy it from the consumer's terminal
+log, where it printed `[Consumer] Received: {...}` -- same `eventId` and
+all). The consumer logs:
+
+```
+[Consumer] Event <id> was already processed -- skipping (idempotent).
+```
+
+and acks it without touching the pantry again, because `processed_events`
+already has a row for that `eventId`. This demonstrates the brief's "a
+repeated event is ignored" requirement.
+
 ## Known limitations
 
 - No authentication — anyone who can reach the API can read/write everything.
@@ -159,3 +263,11 @@ re-enabling, before the page's next retry fires.
 - `/reset` has no confirmation step and no access control — anyone who
   knows the URL can wipe the data instantly. Acceptable for a local dev
   convenience, not something to expose publicly.
+- `/api/internal/notify-pantry-change` is unauthenticated and undocumented
+  for external use — it exists purely so the separate consumer process can
+  trigger a WebSocket broadcast after it updates the pantry. Same dev-grade
+  status as `/reset`.
+- The consumer's database credentials are supplied via environment
+  variables, not committed to source — but it still connects with a plain
+  username/password over JDBC, same trust model as the web app's own JDBC
+  pool, not a separately secured service account.

@@ -27,6 +27,9 @@ public class ShoppingListService {
     @Inject
     private Event<LiveUpdate> liveUpdates;
 
+    @Inject
+    private EventPublisher eventPublisher;
+
     public List<ShoppingItemDto> list() {
         List<ShoppingItem> items = em.createQuery(
                         "SELECT s FROM ShoppingItem s ORDER BY s.status, s.id",
@@ -107,8 +110,25 @@ public class ShoppingListService {
         em.flush();
 
         liveUpdates.fire(LiveUpdate.shopping("bought", itemId));
+        eventPublisher.publishItemPurchased(toItemPurchasedJson(item, user));
 
         return toDto(item);
+    }
+
+    /**
+     * eventId is a fresh UUID per publish, not the shopping item's own id --
+     * the consumer uses it to tell "a brand new purchase" apart from "the
+     * same RabbitMQ message delivered again" (see the consumer's idempotency
+     * check against the processed_events table).
+     */
+    private String toItemPurchasedJson(ShoppingItem item, AppUser user) {
+        String eventId = java.util.UUID.randomUUID().toString();
+        return "{\"eventId\":\"" + eventId + "\"," +
+                "\"shoppingItemId\":" + item.getId() + "," +
+                "\"ingredientId\":" + item.getIngredient().getId() + "," +
+                "\"qty\":" + item.getQty() + "," +
+                "\"boughtByUserId\":" + user.getId() + "," +
+                "\"boughtAt\":\"" + item.getBoughtAt().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "\"}";
     }
 
     private ShoppingItem findExistingNeededItem(Long ingredientId) {

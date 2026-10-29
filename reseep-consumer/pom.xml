@@ -1,0 +1,62 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      Deliberately a separate, standalone Maven project -- not a module of
+      the main reseep webapp, and not deployed to Payara. It's its own plain
+      Java program: a different, independently running process from the
+      web app, which is the whole point of using a message broker to connect
+      them instead of calling a method directly.
+    -->
+    <groupId>com.mycompany.reseep</groupId>
+    <artifactId>reseep-consumer</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.rabbitmq</groupId>
+            <artifactId>amqp-client</artifactId>
+            <version>5.21.0</version>
+        </dependency>
+
+        <!-- Same connector/version the web app uses, for consistency. -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>9.7.0</version>
+        </dependency>
+
+        <!-- Small JSON library for reading the event payload -- the web
+             app can use jakarta.json because Payara provides it, but this
+             is a plain Java program with no Jakarta EE container. -->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20231013</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Lets you run the consumer with "mvn exec:java" instead of
+                 having to build and run a fat jar by hand. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <mainClass>com.mycompany.reseep.consumer.PurchaseConsumer</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
