@@ -80,6 +80,7 @@
     gap:2px;
     margin-bottom:0;
     border-bottom:1px solid var(--line);
+    overflow-x:auto;
   }
   .tab-btn{
     background:none;
@@ -93,6 +94,8 @@
     color:var(--ink-soft);
     position:relative;
     top:1px;
+    text-decoration:none;
+    white-space:nowrap;
   }
   .tab-btn:hover{ color:var(--ink); }
   .tab-btn.active{
@@ -155,8 +158,10 @@
   .btn[disabled]{ opacity:.45; cursor:not-allowed; }
 
   .recipe-card{
+    display:block;
     padding-left:32px;
     cursor:pointer;
+    text-decoration:none;
   }
   .recipe-card:hover{ border-color:var(--ink-soft); }
   .recipe-card-top{
@@ -393,9 +398,11 @@
     </div>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Sections">
-    <button class="tab-btn active" data-view="recipes" role="tab" aria-selected="true">Recipes</button>
-    <button class="tab-btn" data-view="pantry" role="tab" aria-selected="false">Pantry</button>
+  <nav class="tabs" aria-label="Sections">
+    <a class="tab-btn active" href="#/recipes" data-route="recipes" aria-current="page">Recipes</a>
+    <a class="tab-btn" href="#/pantry" data-route="pantry">Pantry</a>
+    <a class="tab-btn" href="#/plan" data-route="plan">Meal plan</a>
+    <a class="tab-btn" href="#/shopping" data-route="shopping">Shopping list</a>
   </nav>
 
   <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span><span class="status-sep">|</span><span class="status-dot" id="liveDot"></span><span id="liveStatusText" aria-live="polite">Live updates connecting…</span></p>
@@ -477,6 +484,28 @@
         <input type="number" id="newIngredientQty" placeholder="Qty" min="0" step="0.5" />
         <button class="btn btn-secondary btn-small" id="btnAddPantryItem">Add to pantry</button>
       </div>
+    </div>
+  </section>
+
+  <!-- MEAL PLAN (filled in once the plan endpoint exists) -->
+  <section class="view" id="view-plan" hidden>
+    <div class="list-toolbar">
+      <h2>Meal plan</h2>
+    </div>
+    <div class="card empty-state">
+      <strong>Nothing planned yet</strong>
+      Planning a recipe will add anything your pantry is short on to the shopping list.
+    </div>
+  </section>
+
+  <!-- SHOPPING LIST (filled in once the shopping endpoints exist) -->
+  <section class="view" id="view-shopping" hidden>
+    <div class="list-toolbar">
+      <h2>Shopping list</h2>
+    </div>
+    <div class="card empty-state">
+      <strong>The shopping list is empty</strong>
+      Items appear here when a planned recipe needs something the pantry doesn't have.
     </div>
   </section>
 
@@ -651,21 +680,63 @@ function showToast(msg) {
   showToast._timer = setTimeout(() => t.classList.remove("show"), 2200);
 }
 
-// ---- Tabs ------------------------------------------------------------------
-document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => { b.classList.remove("active"); b.setAttribute("aria-selected","false"); });
-    btn.classList.add("active");
-    btn.setAttribute("aria-selected","true");
-    showView(btn.dataset.view);
-  });
-});
+// ---- Routing ---------------------------------------------------------------
+// Each view has its own URL hash so it can be linked, bookmarked and reloaded:
+//   #/recipes          recipe list
+//   #/recipes/new      new recipe
+//   #/recipes/{id}     edit a recipe
+//   #/pantry           pantry
+//   #/plan             meal plan
+//   #/shopping         shopping list
+const TOP_LEVEL_VIEWS = ["recipes", "pantry", "plan", "shopping"];
 
 function showView(name) {
-  ["recipes","pantry","detail"].forEach((v) => {
+  [...TOP_LEVEL_VIEWS, "detail"].forEach((v) => {
     el("view-" + v).hidden = (v !== name);
   });
 }
+
+function setActiveTab(route) {
+  document.querySelectorAll(".tab-btn").forEach((tab) => {
+    const active = tab.dataset.route === route;
+    tab.classList.toggle("active", active);
+    if (active) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  });
+}
+
+function navigate(hash) {
+  if (location.hash === hash) router(); // same hash fires no hashchange
+  else location.hash = hash;
+}
+
+function router() {
+  const [view, param] = location.hash.replace(/^#\/?/, "").split("/");
+
+  if (view === "recipes" && param) {
+    const found = param === "new" ? openNewRecipe() : openRecipeDetail(normalizeId(param));
+    if (!found) {
+      showToast("That recipe doesn't exist");
+      navigate("#/recipes");
+      return;
+    }
+    setActiveTab("recipes");
+    showView("detail");
+    return;
+  }
+
+  if (!TOP_LEVEL_VIEWS.includes(view)) {
+    history.replaceState(null, "", "#/recipes"); // unknown or empty hash
+    router();
+    return;
+  }
+
+  currentRecipe = null; // leaving the editor discards unsaved changes, as before
+  setActiveTab(view);
+  showView(view);
+}
+
+window.addEventListener("hashchange", router);
 
 // ---- Rendering: recipe list --------------------------------------------
 function missingForRecipe(recipe) {
@@ -695,8 +766,9 @@ function renderRecipeList() {
 
   recipes.forEach((recipe) => {
     const missing = missingForRecipe(recipe);
-    const card = document.createElement("div");
+    const card = document.createElement("a");
     card.className = "card recipe-card";
+    card.href = `#/recipes/${encodeURIComponent(recipe.id)}`;
     card.innerHTML = `
       <div class="recipe-card-top">
         <div>
@@ -708,7 +780,6 @@ function renderRecipeList() {
           : `<span class="badge badge-missing">${missing.length} missing</span>`}
       </div>
     `;
-    card.addEventListener("click", () => openRecipeDetail(recipe.id));
     container.appendChild(card);
   });
 }
@@ -720,19 +791,19 @@ function escapeHtml(str) {
 }
 
 // ---- Recipe detail view --------------------------------------------------
+// Called by the router; returns false if there's no such recipe.
 function openRecipeDetail(id) {
   const recipe = recipes.find((r) => r.id === id);
+  if (!recipe) return false;
   currentRecipe = JSON.parse(JSON.stringify(recipe)); // work on a copy
   renderDetail(false);
-  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  showView("detail");
+  return true;
 }
 
 function openNewRecipe() {
   currentRecipe = { id: "new-" + Date.now(), name: "", servings: 2, notes: "", items: [] };
   renderDetail(true);
-  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  showView("detail");
+  return true;
 }
 
 function renderDetail(isNew) {
@@ -902,15 +973,12 @@ function renderMissingPanel() {
   }
 }
 
-el("btnNewRecipe").addEventListener("click", openNewRecipe);
+el("btnNewRecipe").addEventListener("click", () => navigate("#/recipes/new"));
 el("btnBackToList").addEventListener("click", backToRecipes);
 el("btnCancelDetail").addEventListener("click", backToRecipes);
 
 function backToRecipes() {
-  currentRecipe = null;
-  document.querySelector('.tab-btn[data-view="recipes"]').classList.add("active");
-  document.querySelector('.tab-btn[data-view="recipes"]').setAttribute("aria-selected","true");
-  showView("recipes");
+  navigate("#/recipes");
 }
 
 el("btnSaveRecipe").addEventListener("click", async () => {
@@ -1129,6 +1197,7 @@ async function init() {
   updateApiStatus();
   renderRecipeList();
   renderPantry();
+  router(); // after loading, so #/recipes/{id} can find its recipe
   // ?live=off runs the page on REST alone, to show it still works when the
   // WebSocket is unavailable.
   if (new URLSearchParams(location.search).get("live") === "off") {
