@@ -67,6 +67,30 @@ public class DbInitializer {
                     "CONSTRAINT fk_si_added_by FOREIGN KEY (added_by_id) REFERENCES app_user(id) ON DELETE RESTRICT," +
                     "CONSTRAINT fk_si_bought_by FOREIGN KEY (bought_by_id) REFERENCES app_user(id) ON DELETE RESTRICT)");
 
+            // Idempotency guard for the broker consumer: one row per
+            // ItemPurchased event it has successfully finished processing.
+            // If the same event is delivered twice (a retry, or a manually
+            // replayed message), the consumer checks this table first and
+            // skips reprocessing.
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS processed_events (" +
+                    "event_id VARCHAR(64) PRIMARY KEY," +
+                    "processed_at DATETIME NOT NULL)");
+
+            // Audit trail: one row per purchase the consumer has applied to
+            // the pantry, separate from shopping_item so the history survives
+            // even if the shopping list item itself is later changed.
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS purchase_log (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                    "shopping_item_id BIGINT NOT NULL," +
+                    "ingredient_id BIGINT NOT NULL," +
+                    "qty DOUBLE NOT NULL," +
+                    "bought_by_id BIGINT NOT NULL," +
+                    "bought_at DATETIME NOT NULL," +
+                    "event_id VARCHAR(64) NOT NULL," +
+                    "CONSTRAINT fk_pl_shopping_item FOREIGN KEY (shopping_item_id) REFERENCES shopping_item(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_pl_ingredient FOREIGN KEY (ingredient_id) REFERENCES ingredient(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_pl_bought_by FOREIGN KEY (bought_by_id) REFERENCES app_user(id) ON DELETE RESTRICT)");
+
             seedIfEmpty(conn);
             seedUsersIfEmpty(conn);
 
@@ -128,7 +152,7 @@ public class DbInitializer {
         try (Statement stmt = conn.createStatement()) {
             stmt.executeUpdate("INSERT INTO app_user (username, password, role) VALUES " +
                     "('cook','cook123','COOK')," +
-                    "('shopper','shopper123','SHOPPER')");
+                    "('shopper','shop123','SHOPPER')");
         }
     }
 }
