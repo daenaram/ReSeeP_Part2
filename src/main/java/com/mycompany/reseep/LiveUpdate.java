@@ -19,6 +19,10 @@ public record LiveUpdate(String type, String action, Long id) {
         return new LiveUpdate("recipe-updated", action, id);
     }
 
+    public static LiveUpdate shopping(String action, Long id) {
+        return new LiveUpdate("shopping-updated", action, id);
+    }
+
     public String toJson() {
         return "{\"type\":\"" + type + "\",\"action\":\"" + action + "\",\"id\":" + id + "}";
     }

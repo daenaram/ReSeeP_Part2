@@ -55,6 +55,18 @@ public class DbInitializer {
                     "password VARCHAR(100) NOT NULL," +
                     "role VARCHAR(20) NOT NULL)");
 
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS shopping_item (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                    "ingredient_id BIGINT NOT NULL," +
+                    "qty DOUBLE NOT NULL," +
+                    "status VARCHAR(20) NOT NULL," +
+                    "added_by_id BIGINT NOT NULL," +
+                    "bought_by_id BIGINT," +
+                    "bought_at DATETIME," +
+                    "CONSTRAINT fk_si_ingredient FOREIGN KEY (ingredient_id) REFERENCES ingredient(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_si_added_by FOREIGN KEY (added_by_id) REFERENCES app_user(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_si_bought_by FOREIGN KEY (bought_by_id) REFERENCES app_user(id) ON DELETE RESTRICT)");
+
             seedIfEmpty(conn);
             seedUsersIfEmpty(conn);
 
