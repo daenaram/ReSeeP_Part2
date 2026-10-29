@@ -90,6 +90,47 @@ a blank recipe/ingredient name, a negative quantity, or an unknown
 JSON error message. Requesting a recipe/ingredient id that doesn't exist
 returns `404 Not Found`.
 
+## Live updates (WebSocket)
+
+Open web pages connect to:
+
+```
+ws://localhost:8080/reseep/ws/updates
+```
+
+After every successful (committed) create/update/delete on recipes or the
+pantry, the server pushes one small message to every connected page:
+
+```json
+{ "type": "pantry-updated", "action": "updated", "id": 3 }
+{ "type": "recipe-updated", "action": "deleted", "id": 7 }
+```
+
+`type` is `pantry-updated` or `recipe-updated`; `action` is `created`,
+`updated` or `deleted`. The page treats the message as a hint and re-fetches
+`/recipes` and `/pantry` over REST, so REST remains the source of truth.
+
+Broadcasts are fired as CDI events observed at
+`TransactionPhase.AFTER_SUCCESS` (`LiveUpdateBroadcaster.java`), so a page
+never hears about a change before it is committed, and a rolled-back write
+sends nothing.
+
+If the connection drops, the page shows "Live updates lost — retrying" and
+reconnects with exponential backoff (1s, 2s, 4s … capped at 10s). On
+reconnect it reloads the full current state, since any changes made while
+disconnected were never pushed.
+
+**Try it:** open `http://localhost:8080/reseep/` in two browser windows side
+by side, change a pantry quantity in one, and the other updates (including
+the "Ready to cook / N missing" badges) without a refresh.
+
+To see recovery, run `asadmin disable reseep` while a page is open. The
+status line switches to "Live updates lost". Run `asadmin enable reseep`
+and, within a few seconds, the page reconnects on its own, shows
+"Reconnected — showing latest data" and reloads everything. To show that it
+catches up on missed changes, edit something with curl right after
+re-enabling, before the page's next retry fires.
+
 ## Known limitations
 
 - No authentication — anyone who can reach the API can read/write everything.

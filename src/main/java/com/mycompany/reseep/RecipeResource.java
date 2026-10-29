@@ -1,5 +1,7 @@
 package com.mycompany.reseep;
 
+import jakarta.enterprise.event.Event;
+import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.transaction.Transactional;
@@ -18,6 +20,9 @@ public class RecipeResource {
 
     @PersistenceContext(unitName = "reseepPU")
     private EntityManager em;
+
+    @Inject
+    private Event<LiveUpdate> liveUpdates;
 
     @GET
     public List<RecipeDto> list() {
@@ -50,6 +55,7 @@ public class RecipeResource {
         em.persist(recipe);
         em.flush();
 
+        liveUpdates.fire(LiveUpdate.recipe("created", recipe.getId()));
         return Response.status(Response.Status.CREATED)
                 .entity(toDto(recipe))
                 .build();
@@ -73,6 +79,7 @@ public class RecipeResource {
         Response itemsError = applyItems(recipe, dto);
         if (itemsError != null) return itemsError;
 
+        liveUpdates.fire(LiveUpdate.recipe("updated", id));
         return Response.ok(toDto(recipe)).build();
     }
 
@@ -85,6 +92,7 @@ public class RecipeResource {
             return notFound("recipe " + id);
         }
         em.remove(recipe);
+        liveUpdates.fire(LiveUpdate.recipe("deleted", id));
         return Response.noContent().build();
     }
 
