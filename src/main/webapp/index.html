@@ -223,6 +223,26 @@
   }
   .field input:focus, .field select:focus{ background:#fff; }
 
+  /* ---------- Sign-in ---------- */
+  .user-bar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .user-bar[hidden]{ display:none; }
+  .user-bar strong{ color:var(--ink); font-weight:600; }
+  .login-card{ max-width:380px; padding-left:32px; }
+  .login-title{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:20px;
+    margin:0 0 16px;
+  }
+  .form-error{ color:var(--alert-dark); font-size:13px; margin:0 0 12px; }
+  .login-hint{ font-size:12px; color:var(--ink-soft); margin:16px 0 0; }
+
   .section-label{
     font-family:"Fraunces", serif;
     font-weight:600;
@@ -396,9 +416,13 @@
       <h1 class="app-title">Re<span>See</span>P</h1>
       <p class="app-tagline">Keep your recipes and your pantry talking to each other.</p>
     </div>
+    <div class="user-bar" id="userBar" hidden>
+      <span>Signed in as <strong id="userBarName"></strong> (<span id="userBarRole"></span>)</span>
+      <button class="btn btn-secondary btn-small" id="btnSignOut">Sign out</button>
+    </div>
   </header>
 
-  <nav class="tabs" aria-label="Sections">
+  <nav class="tabs" id="mainNav" aria-label="Sections" hidden>
     <a class="tab-btn active" href="#/recipes" data-route="recipes" aria-current="page">Recipes</a>
     <a class="tab-btn" href="#/pantry" data-route="pantry">Pantry</a>
     <a class="tab-btn" href="#/plan" data-route="plan">Meal plan</a>
@@ -407,8 +431,32 @@
 
   <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span><span class="status-sep">|</span><span class="status-dot" id="liveDot"></span><span id="liveStatusText" aria-live="polite">Live updates connecting…</span></p>
 
+  <!-- SIGN IN -->
+  <section class="view" id="view-login" hidden>
+    <div class="card login-card">
+      <h2 class="login-title">Sign in</h2>
+      <form id="loginForm" novalidate>
+        <div class="field-row">
+          <div class="field">
+            <label for="fUsername">Username</label>
+            <input type="text" id="fUsername" autocomplete="username" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="fPassword">Password</label>
+            <input type="password" id="fPassword" autocomplete="current-password" />
+          </div>
+        </div>
+        <p class="form-error" id="loginError" role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit" id="btnSignIn">Sign in</button>
+      </form>
+      <p class="login-hint">Test accounts: <code>cook</code> / <code>cook123</code> (Cook) and <code>shopper</code> / <code>shop123</code> (Shopper).</p>
+    </div>
+  </section>
+
   <!-- RECIPES LIST -->
-  <section class="view" id="view-recipes">
+  <section class="view" id="view-recipes" hidden>
     <div class="list-toolbar">
       <h2>Your recipes</h2>
       <button class="btn btn-primary" id="btnNewRecipe">+ New recipe</button>
@@ -590,7 +638,18 @@ async function apiRequest(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options
   });
-  if (!res.ok) throw new Error("Request failed: " + res.status);
+  if (!res.ok) {
+    // Prefer the server's own {"error": "..."} message, and keep the status
+    // so callers can tell "server said no" (4xx) from "server unreachable".
+    let message = "Request failed: " + res.status;
+    try {
+      const body = await res.json();
+      if (body && body.error) message = body.error;
+    } catch (e) { /* not JSON */ }
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  }
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
@@ -680,20 +739,145 @@ function showToast(msg) {
   showToast._timer = setTimeout(() => t.classList.remove("show"), 2200);
 }
 
+// ---- Sign-in and roles -----------------------------------------------------
+//   POST {API_BASE}/login  { username, password }  ->  { id, username, role }
+// role is "COOK" or "SHOPPER". Until the backend has /login (404) or if the
+// server is unreachable, the test accounts below are used instead so the web
+// client can be built and demoed. A 400/401 from a real server is final.
+//
+// Hiding views by role is a convenience for the user, not security: the API
+// must check the role itself before allowing a write.
+const MOCK_USERS = [
+  { id: 1, username: "cook", password: "cook123", role: "COOK" },
+  { id: 2, username: "shopper", password: "shop123", role: "SHOPPER" },
+];
+const ROLE_VIEWS = {
+  COOK: ["recipes", "pantry", "plan", "shopping"],
+  SHOPPER: ["shopping", "pantry"],
+};
+const ROLE_LABELS = { COOK: "Cook", SHOPPER: "Shopper" };
+const SESSION_KEY = "reseep.user";
+
+let currentUser = loadSessionUser();
+let pendingRoute = null; // where a signed-out user was heading
+
+function loadSessionUser() {
+  try {
+    const user = JSON.parse(sessionStorage.getItem(SESSION_KEY));
+    return user && ROLE_VIEWS[user.role] ? user : null;
+  } catch (e) {
+    return null; // storage blocked or corrupt: just sign in again
+  }
+}
+
+function saveSessionUser(user) {
+  try {
+    if (user) sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    else sessionStorage.removeItem(SESSION_KEY);
+  } catch (e) { /* storage blocked: stays signed in until reload */ }
+}
+
+async function loginApi(username, password) {
+  try {
+    return await apiRequest("/login", { method: "POST", body: JSON.stringify({ username, password }) });
+  } catch (e) {
+    if (e.status && e.status !== 404) throw e;
+    const match = MOCK_USERS.find((u) => u.username === username && u.password === password);
+    if (!match) {
+      const err = new Error("Invalid username or password.");
+      err.status = 401;
+      throw err;
+    }
+    const { password: _ignored, ...user } = match;
+    return { ...user, mock: true };
+  }
+}
+
+function canView(view) {
+  return !!currentUser && ROLE_VIEWS[currentUser.role].includes(view);
+}
+
+function defaultRoute() {
+  return "#/" + ROLE_VIEWS[currentUser.role][0];
+}
+
+function updateUserBar() {
+  el("userBar").hidden = !currentUser;
+  el("mainNav").hidden = !currentUser;
+  if (!currentUser) return;
+  el("userBarName").textContent = currentUser.username;
+  el("userBarRole").textContent = ROLE_LABELS[currentUser.role];
+  document.querySelectorAll(".tab-btn").forEach((tab) => {
+    tab.hidden = !canView(tab.dataset.route);
+  });
+}
+
+function showLoginError(message) {
+  el("loginError").textContent = message || "";
+  el("loginError").hidden = !message;
+}
+
+el("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = el("fUsername").value.trim();
+  const password = el("fPassword").value;
+  if (!username || !password) {
+    showLoginError("Enter your username and password.");
+    (username ? el("fPassword") : el("fUsername")).focus();
+    return;
+  }
+
+  el("btnSignIn").disabled = true;
+  try {
+    const user = await loginApi(username, password);
+    user.role = String(user.role).toUpperCase();
+    if (!ROLE_VIEWS[user.role]) throw new Error("This account has no access to the web app.");
+
+    currentUser = user;
+    saveSessionUser(user);
+    el("loginForm").reset();
+    showLoginError(null);
+    updateUserBar();
+    showToast(`Signed in as ${user.username}` + (user.mock ? " (test account — no login server yet)" : ""));
+
+    const target = pendingRoute && canView(routeView(pendingRoute)) ? pendingRoute : defaultRoute();
+    pendingRoute = null;
+    navigate(target);
+  } catch (err) {
+    showLoginError(err.status ? err.message : "Couldn't reach the server: " + err.message);
+  } finally {
+    el("btnSignIn").disabled = false;
+  }
+});
+
+el("btnSignOut").addEventListener("click", () => {
+  currentUser = null;
+  saveSessionUser(null);
+  updateUserBar();
+  showToast("Signed out");
+  navigate("#/login");
+});
+
 // ---- Routing ---------------------------------------------------------------
 // Each view has its own URL hash so it can be linked, bookmarked and reloaded:
+//   #/login            sign in (the only view while signed out)
 //   #/recipes          recipe list
 //   #/recipes/new      new recipe
 //   #/recipes/{id}     edit a recipe
 //   #/pantry           pantry
 //   #/plan             meal plan
 //   #/shopping         shopping list
+// Which of these a user can open depends on their role (ROLE_VIEWS).
 const TOP_LEVEL_VIEWS = ["recipes", "pantry", "plan", "shopping"];
 
 function showView(name) {
-  [...TOP_LEVEL_VIEWS, "detail"].forEach((v) => {
+  ["login", ...TOP_LEVEL_VIEWS, "detail"].forEach((v) => {
     el("view-" + v).hidden = (v !== name);
   });
+}
+
+function routeView(hash) {
+  return hash.replace(/^#\/?/, "").split("/")[0];
 }
 
 function setActiveTab(route) {
@@ -713,6 +897,29 @@ function navigate(hash) {
 function router() {
   const [view, param] = location.hash.replace(/^#\/?/, "").split("/");
 
+  if (!currentUser) {
+    if (view !== "login") pendingRoute = location.hash; // come back here after signing in
+    history.replaceState(null, "", "#/login");
+    currentRecipe = null;
+    setActiveTab(null);
+    showView("login");
+    el("fUsername").focus();
+    return;
+  }
+
+  if (view === "login" || !TOP_LEVEL_VIEWS.includes(view)) {
+    history.replaceState(null, "", defaultRoute()); // already signed in, or unknown/empty hash
+    router();
+    return;
+  }
+
+  if (!canView(view)) {
+    showToast(`The ${ROLE_LABELS[currentUser.role]} role can't open that page`);
+    history.replaceState(null, "", defaultRoute());
+    router();
+    return;
+  }
+
   if (view === "recipes" && param) {
     const found = param === "new" ? openNewRecipe() : openRecipeDetail(normalizeId(param));
     if (!found) {
@@ -722,12 +929,6 @@ function router() {
     }
     setActiveTab("recipes");
     showView("detail");
-    return;
-  }
-
-  if (!TOP_LEVEL_VIEWS.includes(view)) {
-    history.replaceState(null, "", "#/recipes"); // unknown or empty hash
-    router();
     return;
   }
 
