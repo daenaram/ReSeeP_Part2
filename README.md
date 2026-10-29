@@ -92,10 +92,10 @@ returns `404 Not Found`.
 
 ## Test accounts
 
-| Username  | Password  | Role    | Web views                                   |
-|-----------|-----------|---------|---------------------------------------------|
-| `cook`    | `cook123` | Cook    | Recipes, Pantry, Meal plan, Shopping list   |
-| `shopper` | `shop123` | Shopper | Shopping list, Pantry                       |
+| Username  | Password     | Role    | Web views                                   |
+|-----------|--------------|---------|---------------------------------------------|
+| `cook`    | `cook123`    | Cook    | Recipes, Pantry, Meal plan, Shopping list   |
+| `shopper` | `shopper123` | Shopper | Shopping list, Pantry                     |
 
 The web client signs in with `POST /api/login` (`{ username, password }` →
 `{ id, username, role }`). Until that endpoint exists, the page falls back to

@@ -34,6 +34,7 @@ public class ShoppingItem {
     @JoinColumn(name = "bought_by_id")
     private AppUser boughtBy;
 
+    @Column(name = "bought_at")
     private LocalDateTime boughtAt;
 
     public ShoppingItem() {
