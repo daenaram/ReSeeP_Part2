@@ -353,6 +353,39 @@
   .pantry-name{ flex:1; font-weight:500; }
   .pantry-name small{ display:block; color:var(--ink-soft); font-weight:400; font-size:12px; }
   .pantry-qty{ display:flex; align-items:center; gap:6px; }
+
+  /* ---------- Shopping list ---------- */
+  .shopping-group + .shopping-group{ margin-top:18px; }
+  .shopping-row.bought .pantry-name{ color:var(--ink-soft); text-decoration:line-through; }
+  .shopping-row.bought .pantry-name small{ text-decoration:none; }
+  .badge-todo{ color:var(--spice-dark); border-color:var(--spice); background:#FBF1E6; }
+  .notice{
+    font-size:13px;
+    border:1px solid var(--line);
+    background:var(--surface);
+    padding:10px 14px;
+    margin:0 0 14px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .notice[hidden]{ display:none; }
+  .notice.error{ border-color:var(--alert); background:#F7E9E7; color:var(--alert-dark); }
+  .tab-count{
+    display:inline-block;
+    min-width:18px;
+    margin-left:4px;
+    padding:0 5px;
+    border-radius:9px;
+    background:var(--spice);
+    color:#fff;
+    font-size:11px;
+    line-height:18px;
+    text-align:center;
+  }
+  .tab-count:empty{ display:none; }
   .pantry-qty input{
     width:70px;
     border:1px solid var(--line);
@@ -426,7 +459,7 @@
     <a class="tab-btn active" href="#/recipes" data-route="recipes" aria-current="page">Recipes</a>
     <a class="tab-btn" href="#/pantry" data-route="pantry">Pantry</a>
     <a class="tab-btn" href="#/plan" data-route="plan">Meal plan</a>
-    <a class="tab-btn" href="#/shopping" data-route="shopping">Shopping list</a>
+    <a class="tab-btn" href="#/shopping" data-route="shopping">Shopping list<span class="tab-count" id="shoppingCount" aria-label="items to buy"></span></a>
   </nav>
 
   <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span><span class="status-sep">|</span><span class="status-dot" id="liveDot"></span><span id="liveStatusText" aria-live="polite">Live updates connecting…</span></p>
@@ -451,7 +484,7 @@
         <p class="form-error" id="loginError" role="alert" hidden></p>
         <button class="btn btn-primary" type="submit" id="btnSignIn">Sign in</button>
       </form>
-      <p class="login-hint">Test accounts: <code>cook</code> / <code>cook123</code> (Cook) and <code>shopper</code> / <code>shop123</code> (Shopper).</p>
+      <p class="login-hint">Test accounts: <code>cook</code> / <code>cook123</code> (Cook) and <code>shopper</code> / <code>shopper123</code> (Shopper).</p>
     </div>
   </section>
 
@@ -512,6 +545,7 @@
       <div class="detail-actions">
         <button class="btn btn-danger" id="btnDeleteRecipe">Delete recipe</button>
         <div class="right">
+          <button class="btn btn-secondary" id="btnPlanRecipe" title="Adds anything the saved recipe is short on to the shopping list">Plan this recipe</button>
           <button class="btn btn-secondary" id="btnCancelDetail">Cancel</button>
           <button class="btn btn-primary" id="btnSaveRecipe">Save recipe</button>
         </div>
@@ -535,25 +569,32 @@
     </div>
   </section>
 
-  <!-- MEAL PLAN (filled in once the plan endpoint exists) -->
+  <!-- MEAL PLAN -->
   <section class="view" id="view-plan" hidden>
     <div class="list-toolbar">
       <h2>Meal plan</h2>
+      <span class="recipe-meta" id="planSummary"></span>
     </div>
-    <div class="card empty-state">
-      <strong>Nothing planned yet</strong>
-      Planning a recipe will add anything your pantry is short on to the shopping list.
+    <p class="recipe-meta" style="margin:0 0 14px;">Planning a recipe adds whatever your pantry is short on to the shopping list, minus anything already on it.</p>
+    <div class="notice" id="planNotice" role="status" hidden>
+      <span id="planNoticeText"></span>
+      <a class="btn btn-secondary btn-small" href="#/shopping" id="planNoticeLink" hidden>View shopping list</a>
     </div>
+    <div id="planList"></div>
   </section>
 
-  <!-- SHOPPING LIST (filled in once the shopping endpoints exist) -->
+  <!-- SHOPPING LIST -->
   <section class="view" id="view-shopping" hidden>
     <div class="list-toolbar">
       <h2>Shopping list</h2>
+      <span class="recipe-meta" id="shoppingSummary"></span>
     </div>
-    <div class="card empty-state">
-      <strong>The shopping list is empty</strong>
-      Items appear here when a planned recipe needs something the pantry doesn't have.
+    <div class="notice" id="shoppingNotice" role="status" hidden>
+      <span id="shoppingNoticeText"></span>
+      <button class="btn btn-secondary btn-small" id="btnRetryShopping" hidden>Try again</button>
+    </div>
+    <div id="shoppingList">
+      <div class="card empty-state">Loading the shopping list…</div>
     </div>
   </section>
 
@@ -720,9 +761,64 @@ async function createPantryItemApi(item) {
   }
 }
 
+// ---- Shopping list API -----------------------------------------------------
+//   GET  {API_BASE}/shopping              -> [ShoppingItem]
+//   POST {API_BASE}/shopping/{id}/bought  -> ShoppingItem (409 if already bought)
+//   ShoppingItem { id, ingredientId, name, unit, qty, status: "NEEDED"|"BOUGHT",
+//                  addedBy, addedAt, boughtBy, boughtAt }
+// Until the backend has these (404) or if it's unreachable, a sample list is
+// used and changes only live in this tab.
+const minutesAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
+let mockShopping = [
+  { id: "s1", ingredientId: "ing3", name: "Basil",  unit: "g",  qty: 20, status: "NEEDED", addedBy: "cook", addedAt: minutesAgo(40), boughtBy: null, boughtAt: null },
+  { id: "s2", ingredientId: "ing2", name: "Tomato", unit: "pc", qty: 2,  status: "NEEDED", addedBy: "cook", addedAt: minutesAgo(40), boughtBy: null, boughtAt: null },
+  { id: "s3", ingredientId: "ing5", name: "Rice",   unit: "g",  qty: 500, status: "BOUGHT", addedBy: "cook", addedAt: minutesAgo(180), boughtBy: "shopper", boughtAt: minutesAgo(95) },
+];
+
+// "live" = from the server, "sample" = mock fallback, "error" = server failed
+let shoppingSource = "sample";
+let shoppingError = "";
+
+// The server's ShoppingItemDto names some fields differently from the sample
+// list; map them onto the names this page uses.
+function normalizeShoppingItem(it) {
+  return {
+    ...it,
+    name: it.name ?? it.ingredientName,
+    addedBy: it.addedBy ?? it.addedByUsername,
+    boughtBy: it.boughtBy ?? it.boughtByUsername,
+  };
+}
+
+async function loadShopping() {
+  try {
+    const data = await apiRequest("/shopping");
+    shoppingSource = "live";
+    return (data || []).map(normalizeShoppingItem);
+  } catch (e) {
+    if (e.status && e.status !== 404) {
+      shoppingSource = "error"; // server is there but failed: keep what we had
+      shoppingError = e.message;
+      return shoppingItems.length ? shoppingItems : [];
+    }
+    shoppingSource = "sample";
+    return mockShopping;
+  }
+}
+
+async function markBoughtApi(id) {
+  if (shoppingSource !== "live") return null; // caller updates the sample list locally
+  const updated = await apiRequest(`/shopping/${id}/bought`, {
+    method: "POST",
+    body: JSON.stringify({ userId: currentUser.id }), // the server records who bought it
+  });
+  return normalizeShoppingItem(updated);
+}
+
 // ---- App state ------------------------------------------------------------
 let recipes = [];
 let ingredients = [];
+let shoppingItems = [];
 let currentRecipe = null; // recipe object being edited, or null
 
 const el = (id) => document.getElementById(id);
@@ -749,7 +845,7 @@ function showToast(msg) {
 // must check the role itself before allowing a write.
 const MOCK_USERS = [
   { id: 1, username: "cook", password: "cook123", role: "COOK" },
-  { id: 2, username: "shopper", password: "shop123", role: "SHOPPER" },
+  { id: 2, username: "shopper", password: "shopper123", role: "SHOPPER" },
 ];
 const ROLE_VIEWS = {
   COOK: ["recipes", "pantry", "plan", "shopping"],
@@ -933,6 +1029,8 @@ function router() {
   }
 
   currentRecipe = null; // leaving the editor discards unsaved changes, as before
+  if (view === "shopping") renderShopping(); // its buttons depend on who's signed in
+  if (view === "plan") renderPlan(null); // pantry or list may have changed elsewhere; clear old result
   setActiveTab(view);
   showView(view);
 }
@@ -1013,6 +1111,7 @@ function renderDetail(isNew) {
   el("fRecipeServings").value = currentRecipe.servings;
   el("fRecipeNotes").value = currentRecipe.notes || "";
   el("btnDeleteRecipe").style.visibility = isNew ? "hidden" : "visible";
+  el("btnPlanRecipe").hidden = isNew; // only a saved recipe can be planned
 
   renderIngredientRows();
   renderAddIngredientSelect();
@@ -1285,6 +1384,258 @@ el("btnAddPantryItem").addEventListener("click", async () => {
   showToast(created ? "Added to pantry" : "Added locally (no server connected)");
 });
 
+// ---- Meal plan: "Plan this recipe" -----------------------------------------
+//   POST {API_BASE}/recipes/{id}/plan  ->  [ShoppingItem]  (the items it added)
+// The server compares the recipe with the pantry and adds each shortfall to
+// the shopping list, less whatever is already on the list as NEEDED, so
+// planning twice doesn't double up. An empty array means nothing was missing.
+// While the shopping list is the sample one, the same rule runs locally.
+
+// What planning this recipe would add, given the pantry and current list.
+function planShortfall(recipe) {
+  const out = [];
+  recipe.items.forEach((item) => {
+    const ing = findIngredient(item.ingredientId);
+    if (!ing) return;
+    const alreadyListed = shoppingItems
+      .filter((s) => s.ingredientId === item.ingredientId && String(s.status).toUpperCase() !== "BOUGHT")
+      .reduce((sum, s) => sum + (Number(s.qty) || 0), 0);
+    const short = item.qty - ing.qtyOnHand - alreadyListed;
+    if (short > 0) out.push({ ingredientId: ing.id, name: ing.name, unit: ing.unit, qty: short });
+  });
+  return out;
+}
+
+async function planRecipeApi(recipe) {
+  if (shoppingSource !== "live") {
+    const now = new Date().toISOString();
+    const added = planShortfall(recipe).map((s, i) => ({
+      id: `s${Date.now()}${i}`, ...s, status: "NEEDED",
+      addedBy: currentUser.username, addedAt: now, boughtBy: null, boughtAt: null,
+    }));
+    shoppingItems.push(...added);
+    return { added, sample: true };
+  }
+  const added = await apiRequest(`/recipes/${recipe.id}/plan`, {
+    method: "POST",
+    body: JSON.stringify({ userId: currentUser.id }), // the server records who added it
+  });
+  shoppingItems = await loadShopping(); // pick up the server's view of the list
+  return { added: (added || []).map(normalizeShoppingItem), sample: false };
+}
+
+async function planRecipe(recipeId, btn) {
+  const recipe = recipes.find((r) => r.id === recipeId);
+  if (!recipe) return;
+  if (btn) btn.disabled = true;
+
+  let result;
+  try {
+    result = await planRecipeApi(recipe);
+  } catch (e) {
+    showToast(e.status ? e.message : "Couldn't reach the server — try again");
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  const { added, sample } = result;
+  const message = added.length === 0
+    ? `Nothing to buy for ${recipe.name} — you have everything, or it's already on the list.`
+    : `Added ${added.length} item${added.length === 1 ? "" : "s"} for ${recipe.name}: ` +
+      added.map((a) => `${a.name} ${a.qty} ${a.unit}`).join(", ") +
+      (sample ? " (sample list, not saved)" : "");
+
+  showToast(added.length ? `Added ${added.length} item${added.length === 1 ? "" : "s"} to the shopping list` : "Nothing to add");
+  renderShopping();
+  renderPlan({ text: message, showLink: added.length > 0 });
+  if (btn) btn.disabled = false;
+}
+
+function renderPlan(result) {
+  if (result !== undefined) {
+    el("planNotice").hidden = !result;
+    if (result) {
+      el("planNoticeText").textContent = result.text;
+      el("planNoticeLink").hidden = !result.showLink;
+    }
+  }
+
+  const rows = recipes.map((r) => ({ recipe: r, toAdd: planShortfall(r), missing: missingForRecipe(r) }));
+  const ready = rows.filter((r) => r.missing.length === 0).length;
+  el("planSummary").textContent = recipes.length ? `${ready} ready · ${recipes.length - ready} need shopping` : "";
+
+  const container = el("planList");
+  container.innerHTML = "";
+  if (recipes.length === 0) {
+    container.innerHTML = `
+      <div class="card empty-state">
+        <strong>No recipes to plan</strong>
+        Add a recipe first, then plan it here.
+      </div>`;
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.style.paddingLeft = "32px";
+  rows.forEach(({ recipe, toAdd, missing }) => {
+    let detail, badge;
+    if (missing.length === 0) {
+      detail = `serves ${recipe.servings} · everything is in the pantry`;
+      badge = `<span class="badge badge-ok">Ready to cook</span>`;
+    } else if (toAdd.length === 0) {
+      detail = `short on ${missing.map((m) => m.name).join(", ")} · already on the shopping list`;
+      badge = `<span class="badge badge-todo">On the list</span>`;
+    } else {
+      detail = `would add ${toAdd.map((a) => `${a.name} ${a.qty} ${a.unit}`).join(", ")}`;
+      badge = `<span class="badge badge-missing">${missing.length} missing</span>`;
+    }
+    const row = document.createElement("div");
+    row.className = "pantry-row";
+    row.innerHTML = `
+      <span class="pantry-name"><a href="#/recipes/${encodeURIComponent(recipe.id)}">${escapeHtml(recipe.name)}</a><small>${escapeHtml(detail)}</small></span>
+      ${badge}
+      <button class="btn btn-primary btn-small btnPlan" data-id="${escapeHtml(String(recipe.id))}"${toAdd.length ? "" : " disabled"}>Plan</button>
+    `;
+    card.appendChild(row);
+  });
+  container.appendChild(card);
+
+  container.querySelectorAll(".btnPlan").forEach((btn) => {
+    btn.addEventListener("click", () => planRecipe(normalizeId(btn.dataset.id), btn));
+  });
+}
+
+el("btnPlanRecipe").addEventListener("click", () => {
+  if (currentRecipe) planRecipe(currentRecipe.id, el("btnPlanRecipe"));
+});
+
+// ---- Shopping list view ----------------------------------------------------
+// The Cook sees what's needed and who bought what; the Shopper can also tick
+// items off. Buying an item adds its qty to the pantry (done by the server;
+// mirrored locally when using the sample list).
+function formatTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderShopping() {
+  const items = shoppingItems.map((it) => ({ ...it, status: String(it.status).toUpperCase() }));
+  const needed = items.filter((it) => it.status !== "BOUGHT");
+  const bought = items.filter((it) => it.status === "BOUGHT")
+    .sort((a, b) => String(b.boughtAt).localeCompare(String(a.boughtAt)));
+
+  el("shoppingCount").textContent = needed.length || "";
+  el("shoppingSummary").textContent = items.length
+    ? `${needed.length} to buy · ${bought.length} bought`
+    : "";
+
+  const notice = el("shoppingNotice");
+  notice.hidden = shoppingSource === "live";
+  notice.classList.toggle("error", shoppingSource === "error");
+  el("btnRetryShopping").hidden = shoppingSource !== "error";
+  el("shoppingNoticeText").textContent = shoppingSource === "error"
+    ? `Couldn't load the latest shopping list: ${shoppingError}`
+    : "Showing a sample list — the server has no shopping list yet. Changes stay in this tab.";
+
+  const container = el("shoppingList");
+  container.innerHTML = "";
+
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div class="card empty-state">
+        <strong>The shopping list is empty</strong>
+        Items appear here when a planned recipe needs something the pantry doesn't have.
+      </div>`;
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.style.paddingLeft = "32px";
+  if (needed.length) card.appendChild(renderShoppingGroup("To buy", needed));
+  if (bought.length) card.appendChild(renderShoppingGroup("Bought", bought));
+  container.appendChild(card);
+}
+
+function renderShoppingGroup(title, items) {
+  const group = document.createElement("div");
+  group.className = "shopping-group";
+  group.innerHTML = `<h3 class="section-label">${title}</h3>`;
+  const isShopper = currentUser && currentUser.role === "SHOPPER";
+
+  items.forEach((it) => {
+    const ing = findIngredient(it.ingredientId);
+    const name = it.name ?? ing?.name ?? "Unknown ingredient";
+    const unit = it.unit ?? ing?.unit ?? "";
+    const isBought = it.status === "BOUGHT";
+
+    const detail = isBought
+      ? `bought by ${it.boughtBy ?? "someone"}${it.boughtAt ? " · " + formatTime(it.boughtAt) : ""}`
+      : `added by ${it.addedBy ?? "someone"}${ing ? ` · ${ing.qtyOnHand} ${ing.unit} in pantry` : ""}`;
+
+    let action;
+    if (isBought) action = `<span class="badge badge-ok">Bought</span>`;
+    else if (isShopper) action = `<button class="btn btn-primary btn-small btnMarkBought" data-id="${escapeHtml(String(it.id))}">Mark bought</button>`;
+    else action = `<span class="badge badge-todo">To buy</span>`;
+
+    const row = document.createElement("div");
+    row.className = "pantry-row shopping-row" + (isBought ? " bought" : "");
+    row.innerHTML = `
+      <span class="pantry-name">${escapeHtml(name)}<small>${escapeHtml(detail)}</small></span>
+      <span class="pantry-qty">${escapeHtml(String(it.qty))} ${escapeHtml(unit)}</span>
+      ${action}
+    `;
+    group.appendChild(row);
+  });
+
+  group.querySelectorAll(".btnMarkBought").forEach((btn) => {
+    btn.addEventListener("click", () => markBought(normalizeId(btn.dataset.id), btn));
+  });
+  return group;
+}
+
+async function markBought(id, btn) {
+  const item = shoppingItems.find((it) => it.id === id);
+  if (!item) return;
+  btn.disabled = true; // stop double-clicks sending two requests
+
+  try {
+    const updated = await markBoughtApi(id);
+    if (updated) {
+      Object.assign(item, updated);
+      // The server also raised the pantry quantity; fetch it so badges are right.
+      try { ingredients = await apiRequest("/pantry"); } catch (e) { /* the live update will catch up */ }
+      showToast(`${item.name ?? "Item"} marked as bought`);
+    } else {
+      // Sample list: do locally what the server would do.
+      Object.assign(item, { status: "BOUGHT", boughtBy: currentUser.username, boughtAt: new Date().toISOString() });
+      const ing = findIngredient(item.ingredientId);
+      if (ing) ing.qtyOnHand += Number(item.qty) || 0;
+      showToast(`${item.name ?? "Item"} marked as bought (sample list, not saved)`);
+    }
+  } catch (e) {
+    if (e.status === 409) {
+      showToast("Someone already bought that — list updated");
+      shoppingItems = await loadShopping();
+    } else {
+      showToast(e.status ? e.message : "Couldn't reach the server — try again");
+      btn.disabled = false;
+      return;
+    }
+  }
+  renderShopping();
+  renderPantryKeepingFocus();
+  renderRecipeList(); // "Ready to cook" may have changed
+}
+
+el("btnRetryShopping").addEventListener("click", async () => {
+  shoppingItems = await loadShopping();
+  renderShopping();
+  if (shoppingSource !== "error") showToast("Shopping list loaded");
+});
+
 // ---- Live updates (WebSocket) ----------------------------------------------
 // The server pushes a small {type, action, id} message after every committed
 // change to the pantry or recipes. We don't trust the message for data —
@@ -1327,7 +1678,7 @@ function connectLiveUpdates() {
   socket.onmessage = (event) => {
     let msg;
     try { msg = JSON.parse(event.data); } catch (e) { return; }
-    if (msg.type === "pantry-updated" || msg.type === "recipe-updated") {
+    if (msg.type === "pantry-updated" || msg.type === "recipe-updated" || msg.type === "shopping-updated") {
       scheduleRefresh();
     }
   };
@@ -1354,9 +1705,14 @@ async function refreshFromServer(toastMsg) {
   } catch (e) {
     return; // keep showing what we have; the socket will trigger another try
   }
+  // Separate from the line above: until the backend has /shopping, its 404
+  // must not stop recipes and pantry from refreshing.
+  shoppingItems = await loadShopping();
   updateApiStatus();
   renderRecipeList();
   renderPantryKeepingFocus();
+  renderShopping();
+  renderPlan(); // keeps any "Added …" result on screen
 
   // If the recipe being edited was deleted by another user, say so rather
   // than letting a later save fail with a confusing 404.
@@ -1394,10 +1750,11 @@ function updateApiStatus() {
 }
 
 async function init() {
-  [recipes, ingredients] = await Promise.all([loadRecipes(), loadPantry()]);
+  [recipes, ingredients, shoppingItems] = await Promise.all([loadRecipes(), loadPantry(), loadShopping()]);
   updateApiStatus();
   renderRecipeList();
   renderPantry();
+  renderShopping();
   router(); // after loading, so #/recipes/{id} can find its recipe
   // ?live=off runs the page on REST alone, to show it still works when the
   // WebSocket is unavailable.
