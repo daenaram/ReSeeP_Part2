@@ -28,21 +28,9 @@ public class ShoppingResource {
             ShoppingItemDto dto = shoppingListService.markBought(id, userId);
             return Response.ok(dto).build();
         } catch (ShoppingItemNotFoundException | UserNotFoundException e) {
-            return notFound(e.getMessage());
+            return ApiErrors.notFound(e.getMessage());
         } catch (ItemAlreadyBoughtException e) {
-            return conflict(e.getMessage());
+            return ApiErrors.conflict(e.getMessage());
         }
-    }
-
-    private Response notFound(String message) {
-        return Response.status(Response.Status.NOT_FOUND)
-                .entity("{\"error\":\"" + message.replace("\"", "'") + "\"}")
-                .build();
-    }
-
-    private Response conflict(String message) {
-        return Response.status(Response.Status.CONFLICT)
-                .entity("{\"error\":\"" + message.replace("\"", "'") + "\"}")
-                .build();
     }
 }
