@@ -189,7 +189,7 @@ password into source that gets committed):
 
 ```
 cd reseep-consumer
-set DB_PASSWORD=your-aws-mysql-password      # PowerShell: $env:DB_PASSWORD="..."
+set DB_PASSWORD=$X9$2FHzGEaX4aMzsy$8%NxK      # PowerShell: $env:DB_PASSWORD="..."
 mvn exec:java
 ```
 
