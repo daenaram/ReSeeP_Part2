@@ -1,14 +1,16 @@
 package com.mycompany.reseep;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
 import jakarta.ejb.Stateless;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.transaction.Transactional;
-
-import java.util.List;
-import java.util.stream.Collectors;
 
 @Stateless
 public class PantryService {
@@ -76,4 +78,54 @@ public class PantryService {
         dto.setQtyOnHand(ingredient.getQtyOnHand());
         return dto;
     }
+    @Transactional
+public void deleteAll(List<Long> ids) {
+    List<Long> distinct = ids == null ? List.of()
+            : ids.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+    if (distinct.isEmpty()) {
+        throw new ValidationException("Pick at least one ingredient to remove.");
+    }
+
+    List<Ingredient> found = new ArrayList<>();
+    for (Long id : distinct) {
+        Ingredient ingredient = em.find(Ingredient.class, id);
+        if (ingredient == null) {
+            throw new IngredientNotFoundException(id);
+        }
+        found.add(ingredient);
+    }
+
+    List<String> blocked = new ArrayList<>();
+    for (Ingredient ingredient : found) {
+        if (isInUse(ingredient.getId())) {
+            blocked.add(ingredient.getName());
+        }
+    }
+    if (!blocked.isEmpty()) {
+        throw new IngredientInUseException("Can't remove " + String.join(", ", blocked)
+                + " - still used by a recipe, the shopping list or the purchase history.");
+    }
+
+    for (Ingredient ingredient : found) {
+        em.remove(ingredient);
+    }
+    em.flush();
+    for (Ingredient ingredient : found) {
+        liveUpdates.fire(LiveUpdate.pantry("deleted", ingredient.getId()));
+    }
+}
+
+private boolean isInUse(Long id) {
+    long inRecipes = em.createQuery(
+            "SELECT COUNT(r) FROM RecipeIngredient r WHERE r.ingredient.id = :id", Long.class)
+            .setParameter("id", id).getSingleResult();
+    long onList = em.createQuery(
+            "SELECT COUNT(s) FROM ShoppingItem s WHERE s.ingredient.id = :id", Long.class)
+            .setParameter("id", id).getSingleResult();
+    // purchase_log has no entity (the consumer writes it), so use a native query
+    Number logged = (Number) em.createNativeQuery(
+            "SELECT COUNT(*) FROM purchase_log WHERE ingredient_id = ?1")
+            .setParameter(1, id).getSingleResult();
+    return inRecipes > 0 || onList > 0 || logged.longValue() > 0;
+}
 }
