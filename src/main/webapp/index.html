@@ -359,6 +359,9 @@
   .shopping-row.bought .pantry-name{ color:var(--ink-soft); text-decoration:line-through; }
   .shopping-row.bought .pantry-name small{ text-decoration:none; }
   .badge-todo{ color:var(--spice-dark); border-color:var(--spice); background:#FBF1E6; }
+  /* Rows another user just changed, so the live update is noticeable */
+  @keyframes row-flash{ from{ background:#FBF1E6; } to{ background:transparent; } }
+  .shopping-row.just-changed{ animation:row-flash 2.5s ease-out; }
   .notice{
     font-size:13px;
     border:1px solid var(--line);
@@ -430,6 +433,7 @@
 
   @media (prefers-reduced-motion: reduce){
     .toast{ transition:none; }
+    .shopping-row.just-changed{ animation:none; outline:1px solid var(--spice); }
   }
 
   @media (max-width:520px){
@@ -1581,7 +1585,8 @@ function renderShoppingGroup(title, items) {
     else action = `<span class="badge badge-todo">To buy</span>`;
 
     const row = document.createElement("div");
-    row.className = "pantry-row shopping-row" + (isBought ? " bought" : "");
+    row.className = "pantry-row shopping-row" + (isBought ? " bought" : "")
+      + (recentlyChangedIds.has(it.id) ? " just-changed" : "");
     row.innerHTML = `
       <span class="pantry-name">${escapeHtml(name)}<small>${escapeHtml(detail)}</small></span>
       <span class="pantry-qty">${escapeHtml(String(it.qty))} ${escapeHtml(unit)}</span>
@@ -1698,6 +1703,47 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(() => refreshFromServer(), 150);
 }
 
+// Ids of shopping items that changed in the last refresh; renderShopping
+// highlights them. Cleared after the highlight has played.
+let recentlyChangedIds = new Set();
+let recentlyChangedTimer = null;
+
+// Compare the list before and after a refresh: what did *other* users add or
+// buy? Our own actions already got a toast when we did them.
+function describeShoppingChanges(before, after) {
+  const prev = new Map(before.map((it) => [it.id, it]));
+  const me = currentUser ? currentUser.username : null;
+  const added = [], bought = [];
+
+  after.forEach((it) => {
+    const old = prev.get(it.id);
+    const nowBought = String(it.status).toUpperCase() === "BOUGHT";
+    if (!old) {
+      added.push(it);
+    } else if (nowBought && String(old.status).toUpperCase() !== "BOUGHT") {
+      bought.push(it);
+    } else if (!nowBought && Number(old.qty) !== Number(it.qty)) {
+      added.push(it); // planned again: qty went up on an existing item
+    }
+  });
+
+  const changedIds = [...added, ...bought].map((it) => it.id);
+  const byOthersAdded = added.filter((it) => it.addedBy !== me);
+  const byOthersBought = bought.filter((it) => it.boughtBy !== me);
+
+  const parts = [];
+  if (byOthersBought.length === 1) {
+    parts.push(`${byOthersBought[0].boughtBy ?? "Someone"} bought ${byOthersBought[0].name}`);
+  } else if (byOthersBought.length > 1) {
+    parts.push(`${byOthersBought.length} items were bought`);
+  }
+  if (byOthersAdded.length) {
+    const who = byOthersAdded[0].addedBy ?? "Someone";
+    parts.push(`${who} added ${byOthersAdded.length} item${byOthersAdded.length === 1 ? "" : "s"} to the shopping list`);
+  }
+  return { changedIds, message: parts.join(" · ") };
+}
+
 async function refreshFromServer(toastMsg) {
   try {
     [recipes, ingredients] = await Promise.all([apiRequest("/recipes"), apiRequest("/pantry")]);
@@ -1707,12 +1753,29 @@ async function refreshFromServer(toastMsg) {
   }
   // Separate from the line above: until the backend has /shopping, its 404
   // must not stop recipes and pantry from refreshing.
+  const before = shoppingItems;
+  const wasLive = shoppingSource === "live";
   shoppingItems = await loadShopping();
+
+  // Only diff live data against live data: switching from the sample list
+  // to the server's (e.g. on reconnect) isn't "someone changed something".
+  let changeMessage = "";
+  if (wasLive && shoppingSource === "live") {
+    const { changedIds, message } = describeShoppingChanges(before, shoppingItems);
+    changeMessage = message;
+    if (changedIds.length) {
+      recentlyChangedIds = new Set(changedIds);
+      clearTimeout(recentlyChangedTimer);
+      recentlyChangedTimer = setTimeout(() => { recentlyChangedIds = new Set(); }, 3000);
+    }
+  }
+
   updateApiStatus();
   renderRecipeList();
   renderPantryKeepingFocus();
   renderShopping();
   renderPlan(); // keeps any "Added …" result on screen
+  if (!toastMsg && changeMessage) toastMsg = changeMessage;
 
   // If the recipe being edited was deleted by another user, say so rather
   // than letting a later save fail with a confusing 404.
