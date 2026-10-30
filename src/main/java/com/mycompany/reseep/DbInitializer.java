@@ -152,7 +152,10 @@ public class DbInitializer {
         try (Statement stmt = conn.createStatement()) {
             stmt.executeUpdate("INSERT INTO app_user (username, password, role) VALUES " +
                     "('cook','cook123','COOK')," +
-                    "('shopper','shop123','SHOPPER')");
+                    "('shopper','shopper123','SHOPPER')");
         }
+        try (Statement fix = conn.createStatement()) {
+    fix.executeUpdate("UPDATE app_user SET password='shopper123' WHERE username='shopper'");
+}
     }
 }
