@@ -49,7 +49,50 @@ public class DbInitializer {
                     "CONSTRAINT fk_ri_recipe FOREIGN KEY (recipe_id) REFERENCES recipe(id) ON DELETE CASCADE," +
                     "CONSTRAINT fk_ri_ingredient FOREIGN KEY (ingredient_id) REFERENCES ingredient(id) ON DELETE RESTRICT)");
 
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS app_user (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                    "username VARCHAR(50) NOT NULL UNIQUE," +
+                    "password VARCHAR(100) NOT NULL," +
+                    "role VARCHAR(20) NOT NULL)");
+
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS shopping_item (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                    "ingredient_id BIGINT NOT NULL," +
+                    "qty DOUBLE NOT NULL," +
+                    "status VARCHAR(20) NOT NULL," +
+                    "added_by_id BIGINT NOT NULL," +
+                    "bought_by_id BIGINT," +
+                    "bought_at DATETIME," +
+                    "CONSTRAINT fk_si_ingredient FOREIGN KEY (ingredient_id) REFERENCES ingredient(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_si_added_by FOREIGN KEY (added_by_id) REFERENCES app_user(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_si_bought_by FOREIGN KEY (bought_by_id) REFERENCES app_user(id) ON DELETE RESTRICT)");
+
+            // Idempotency guard for the broker consumer: one row per
+            // ItemPurchased event it has successfully finished processing.
+            // If the same event is delivered twice (a retry, or a manually
+            // replayed message), the consumer checks this table first and
+            // skips reprocessing.
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS processed_events (" +
+                    "event_id VARCHAR(64) PRIMARY KEY," +
+                    "processed_at DATETIME NOT NULL)");
+
+            // Audit trail: one row per purchase the consumer has applied to
+            // the pantry, separate from shopping_item so the history survives
+            // even if the shopping list item itself is later changed.
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS purchase_log (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                    "shopping_item_id BIGINT NOT NULL," +
+                    "ingredient_id BIGINT NOT NULL," +
+                    "qty DOUBLE NOT NULL," +
+                    "bought_by_id BIGINT NOT NULL," +
+                    "bought_at DATETIME NOT NULL," +
+                    "event_id VARCHAR(64) NOT NULL," +
+                    "CONSTRAINT fk_pl_shopping_item FOREIGN KEY (shopping_item_id) REFERENCES shopping_item(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_pl_ingredient FOREIGN KEY (ingredient_id) REFERENCES ingredient(id) ON DELETE RESTRICT," +
+                    "CONSTRAINT fk_pl_bought_by FOREIGN KEY (bought_by_id) REFERENCES app_user(id) ON DELETE RESTRICT)");
+
             seedIfEmpty(conn);
+            seedUsersIfEmpty(conn);
 
             System.out.println("[DbInitializer] Schema check complete.");
         } catch (SQLException e) {
@@ -90,5 +133,29 @@ public class DbInitializer {
                     "(2,5,300),(2,6,2),(2,7,2)," +
                     "(3,8,400),(3,9,2),(3,10,3)");
         }
+    }
+
+    /**
+     * Two test accounts so the group can demo both roles straight away
+     * without a signup screen. Plaintext passwords only, matching the
+     * "simple login" scope — see README Known limitations.
+     */
+    private void seedUsersIfEmpty(Connection conn) throws SQLException {
+        try (Statement check = conn.createStatement();
+             ResultSet rs = check.executeQuery("SELECT COUNT(*) FROM app_user")) {
+            rs.next();
+            if (rs.getInt(1) > 0) {
+                return;
+            }
+        }
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO app_user (username, password, role) VALUES " +
+                    "('cook','cook123','COOK')," +
+                    "('shopper','shopper123','SHOPPER')");
+        }
+        try (Statement fix = conn.createStatement()) {
+    fix.executeUpdate("UPDATE app_user SET password='shopper123' WHERE username='shopper'");
+}
     }
 }

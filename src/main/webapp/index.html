@@ -79,8 +79,14 @@
     display:flex;
     gap:2px;
     margin-bottom:0;
-    border-bottom:1px solid var(--line);
+    /* The grey rule is an inset shadow, not a border, so the active tab's
+       underline can sit on top of it without being nudged outside the box —
+       which made the browser add a scrollbar. */
+    box-shadow:inset 0 -1px 0 var(--line);
+    overflow-x:auto;
+    overflow-y:hidden;
   }
+  .tabs[hidden]{ display:none; }
   .tab-btn{
     background:none;
     border:none;
@@ -91,8 +97,8 @@
     font-size:15px;
     font-weight:500;
     color:var(--ink-soft);
-    position:relative;
-    top:1px;
+    text-decoration:none;
+    white-space:nowrap;
   }
   .tab-btn:hover{ color:var(--ink); }
   .tab-btn.active{
@@ -155,8 +161,10 @@
   .btn[disabled]{ opacity:.45; cursor:not-allowed; }
 
   .recipe-card{
+    display:block;
     padding-left:32px;
     cursor:pointer;
+    text-decoration:none;
   }
   .recipe-card:hover{ border-color:var(--ink-soft); }
   .recipe-card-top{
@@ -217,6 +225,35 @@
     color:var(--ink);
   }
   .field input:focus, .field select:focus{ background:#fff; }
+
+  /* ---------- Sign-in ---------- */
+  .user-bar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .user-bar[hidden]{ display:none; }
+  .user-bar strong{ color:var(--ink); font-weight:600; }
+  .login-card{ max-width:380px; padding-left:32px; }
+  .login-title{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:20px;
+    margin:0 0 16px;
+  }
+  .form-error{ color:var(--alert-dark); font-size:13px; margin:0 0 12px; }
+  .form-error[hidden]{ display:none; }
+
+  /* ---------- Inline validation ---------- */
+  .field-error{ color:var(--alert-dark); font-size:12px; margin:4px 0 0; }
+  .field-error[hidden]{ display:none; }
+  input[aria-invalid="true"], select[aria-invalid="true"]{
+    border-color:var(--alert) !important;
+    background:#FBF1F0 !important;
+  }
+  .login-hint{ font-size:12px; color:var(--ink-soft); margin:16px 0 0; }
 
   .section-label{
     font-family:"Fraunces", serif;
@@ -328,6 +365,42 @@
   .pantry-name{ flex:1; font-weight:500; }
   .pantry-name small{ display:block; color:var(--ink-soft); font-weight:400; font-size:12px; }
   .pantry-qty{ display:flex; align-items:center; gap:6px; }
+
+  /* ---------- Shopping list ---------- */
+  .shopping-group + .shopping-group{ margin-top:18px; }
+  .shopping-row.bought .pantry-name{ color:var(--ink-soft); text-decoration:line-through; }
+  .shopping-row.bought .pantry-name small{ text-decoration:none; }
+  .badge-todo{ color:var(--spice-dark); border-color:var(--spice); background:#FBF1E6; }
+  /* Rows another user just changed, so the live update is noticeable */
+  @keyframes row-flash{ from{ background:#FBF1E6; } to{ background:transparent; } }
+  .shopping-row.just-changed{ animation:row-flash 2.5s ease-out; }
+  .notice{
+    font-size:13px;
+    border:1px solid var(--line);
+    background:var(--surface);
+    padding:10px 14px;
+    margin:0 0 14px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .notice[hidden]{ display:none; }
+  .notice.error{ border-color:var(--alert); background:#F7E9E7; color:var(--alert-dark); }
+  .tab-count{
+    display:inline-block;
+    min-width:18px;
+    margin-left:4px;
+    padding:0 5px;
+    border-radius:9px;
+    background:var(--spice);
+    color:#fff;
+    font-size:11px;
+    line-height:18px;
+    text-align:center;
+  }
+  .tab-count:empty{ display:none; }
   .pantry-qty input{
     width:70px;
     border:1px solid var(--line);
@@ -367,9 +440,12 @@
     top:-1px;
   }
   .status-dot.live{ background:var(--herb); }
+  .status-dot.offline{ background:var(--alert); }
+  .status-sep{ margin:0 8px; color:var(--line); }
 
   @media (prefers-reduced-motion: reduce){
     .toast{ transition:none; }
+    .shopping-row.just-changed{ animation:none; outline:1px solid var(--spice); }
   }
 
   @media (max-width:520px){
@@ -389,17 +465,52 @@
       <h1 class="app-title">Re<span>See</span>P</h1>
       <p class="app-tagline">Keep your recipes and your pantry talking to each other.</p>
     </div>
+    <div class="user-bar" id="userBar" hidden>
+      <span>Signed in as <strong id="userBarName"></strong> (<span id="userBarRole"></span>)</span>
+      <button class="btn btn-secondary btn-small" id="btnSignOut">Sign out</button>
+    </div>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Sections">
-    <button class="tab-btn active" data-view="recipes" role="tab" aria-selected="true">Recipes</button>
-    <button class="tab-btn" data-view="pantry" role="tab" aria-selected="false">Pantry</button>
+  <nav class="tabs" id="mainNav" aria-label="Sections" hidden>
+    <a class="tab-btn active" href="#/recipes" data-route="recipes" aria-current="page">Recipes</a>
+    <a class="tab-btn" href="#/pantry" data-route="pantry">Pantry</a>
+    <a class="tab-btn" href="#/plan" data-route="plan">Meal plan</a>
+    <a class="tab-btn" href="#/shopping" data-route="shopping">Shopping list<span class="tab-count" id="shoppingCount" aria-label="items to buy"></span></a>
   </nav>
 
-  <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span></p>
+  <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span><span class="status-sep">|</span><span class="status-dot" id="liveDot"></span><span id="liveStatusText" aria-live="polite">Live updates connecting…</span></p>
+
+  <div class="notice error" id="serverNotice" role="alert" style="margin-top:10px;" hidden>
+    <span id="serverNoticeText"></span>
+    <button class="btn btn-secondary btn-small" id="btnRetryLoad">Try again</button>
+  </div>
+
+  <!-- SIGN IN -->
+  <section class="view" id="view-login" hidden>
+    <div class="card login-card">
+      <h2 class="login-title">Sign in</h2>
+      <form id="loginForm" novalidate>
+        <div class="field-row">
+          <div class="field">
+            <label for="fUsername">Username</label>
+            <input type="text" id="fUsername" autocomplete="username" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="fPassword">Password</label>
+            <input type="password" id="fPassword" autocomplete="current-password" />
+          </div>
+        </div>
+        <p class="form-error" id="loginError" role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit" id="btnSignIn">Sign in</button>
+      </form>
+      <p class="login-hint">Test accounts: <code>cook</code> / <code>cook123</code> (Cook) and <code>shopper</code> / <code>shopper123</code> (Shopper).</p>
+    </div>
+  </section>
 
   <!-- RECIPES LIST -->
-  <section class="view" id="view-recipes">
+  <section class="view" id="view-recipes" hidden>
     <div class="list-toolbar">
       <h2>Your recipes</h2>
       <button class="btn btn-primary" id="btnNewRecipe">+ New recipe</button>
@@ -452,9 +563,12 @@
         <ul class="missing-list" id="missingList"></ul>
       </div>
 
+      <p class="form-error" id="recipeFormError" role="alert" style="margin:16px 0 0;" hidden></p>
+
       <div class="detail-actions">
         <button class="btn btn-danger" id="btnDeleteRecipe">Delete recipe</button>
         <div class="right">
+          <button class="btn btn-secondary" id="btnPlanRecipe" title="Adds anything the saved recipe is short on to the shopping list">Plan this recipe</button>
           <button class="btn btn-secondary" id="btnCancelDetail">Cancel</button>
           <button class="btn btn-primary" id="btnSaveRecipe">Save recipe</button>
         </div>
@@ -478,6 +592,31 @@
     </div>
   </section>
 
+  <!-- MEAL PLAN -->
+  <section class="view" id="view-plan" hidden>
+    <div class="list-toolbar">
+      <h2>Meal plan</h2>
+      <span class="recipe-meta" id="planSummary"></span>
+    </div>
+    <p class="recipe-meta" style="margin:0 0 14px;">Planning a recipe adds whatever your pantry is short on to the shopping list, minus anything already on it.</p>
+    <div class="notice" id="planNotice" role="status" hidden>
+      <span id="planNoticeText"></span>
+      <a class="btn btn-secondary btn-small" href="#/shopping" id="planNoticeLink" hidden>View shopping list</a>
+    </div>
+    <div id="planList"></div>
+  </section>
+
+  <!-- SHOPPING LIST -->
+  <section class="view" id="view-shopping" hidden>
+    <div class="list-toolbar">
+      <h2>Shopping list</h2>
+      <span class="recipe-meta" id="shoppingSummary"></span>
+    </div>
+    <div id="shoppingList">
+      <div class="card empty-state">Loading the shopping list…</div>
+    </div>
+  </section>
+
 </div>
 
 <div class="toast" id="toast"></div>
@@ -486,153 +625,159 @@
 /* =========================================================================
    ReSeeP frontend client
    -------------------------------------------------------------------------
-   This page is written to talk to a JAX-RS backend on Payara through the
-   endpoints below. Point API_BASE at your deployed service, e.g.
-   "http://localhost:8080/reseep/api". Until that backend exists (or if a
-   request fails), the app falls back to the in-memory MOCK data so the UI
-   is fully clickable on its own.
+   This page talks to the JAX-RS backend on Payara; all data comes from and
+   goes to the server — there is no offline/sample mode. If the server can't
+   be reached, the page says so, changes are not applied, and it reloads
+   automatically when the live-update socket reconnects.
 
-   REST resources (Option A: JAX-RS on Payara, MySQL via JPA):
-     GET    {API_BASE}/recipes            -> list of recipes (with items[])
-     GET    {API_BASE}/recipes/{id}       -> one recipe
-     POST   {API_BASE}/recipes            -> create a recipe
-     PUT    {API_BASE}/recipes/{id}       -> update a recipe (replaces items)
-     DELETE {API_BASE}/recipes/{id}       -> delete a recipe
-     GET    {API_BASE}/pantry             -> list of ingredients + qty on hand
-     POST   {API_BASE}/pantry             -> add a new pantry ingredient
-     PUT    {API_BASE}/pantry/{id}        -> update quantity on hand
+   REST resources (JAX-RS on Payara, MySQL via JPA):
+     POST   {API_BASE}/login                  -> sign in, returns { id, username, role }
+     GET    {API_BASE}/recipes                -> list of recipes (with items[])
+     POST   {API_BASE}/recipes                -> create a recipe
+     PUT    {API_BASE}/recipes/{id}           -> update a recipe (replaces items)
+     DELETE {API_BASE}/recipes/{id}           -> delete a recipe
+     POST   {API_BASE}/recipes/{id}/plan      -> add the recipe's shortfall to the shopping list
+     GET    {API_BASE}/pantry                 -> list of ingredients + qty on hand
+     POST   {API_BASE}/pantry                 -> add a new pantry ingredient
+     PUT    {API_BASE}/pantry/{id}            -> update quantity on hand
+     GET    {API_BASE}/shopping               -> shopping list
+     POST   {API_BASE}/shopping/{id}/bought   -> mark an item bought
 
-   Data shapes (match RecipeDto / IngredientDto on the backend):
+   Data shapes (match the backend DTOs):
      Recipe   { id, name, servings, notes, items: [{ ingredientId, qty }] }
      Pantry   { id, name, unit, qtyOnHand }
    ========================================================================= */
 
 const API_BASE = "http://localhost:8080/reseep/api"; // Payara base URL
 
-let usingLiveApi = false;
+let serverReachable = false; // did the last request get any answer from the server?
+let hasLoadedOnce = false;   // have recipes/pantry/shopping loaded at least once?
+let loadError = "";          // shown in the banner while the last full load failed
 
-// ---- Mock data (used until the real API is reachable) -------------------
-let mockIngredients = [
-  { id: "ing1", name: "Spaghetti",      unit: "g",   qtyOnHand: 400 },
-  { id: "ing2", name: "Tomato",         unit: "pc",  qtyOnHand: 2 },
-  { id: "ing3", name: "Basil",          unit: "g",   qtyOnHand: 0 },
-  { id: "ing4", name: "Garlic",         unit: "clove", qtyOnHand: 6 },
-  { id: "ing5", name: "Rice",           unit: "g",   qtyOnHand: 500 },
-  { id: "ing6", name: "Egg",            unit: "pc",  qtyOnHand: 3 },
-  { id: "ing7", name: "Soy sauce",      unit: "tbsp", qtyOnHand: 0 },
-  { id: "ing8", name: "Ground beef",    unit: "g",   qtyOnHand: 0 },
-  { id: "ing9", name: "Kidney beans",   unit: "can", qtyOnHand: 2 },
-  { id: "ing10", name: "Chili powder",  unit: "tsp", qtyOnHand: 4 }
-];
-
-let mockRecipes = [
-  {
-    id: "r1", name: "Tomato basil pasta", servings: 2, notes: "Quick midweek dinner",
-    items: [
-      { ingredientId: "ing1", qty: 200 },
-      { ingredientId: "ing2", qty: 3 },
-      { ingredientId: "ing3", qty: 10 },
-      { ingredientId: "ing4", qty: 2 }
-    ]
-  },
-  {
-    id: "r2", name: "Pantry fried rice", servings: 3, notes: "Good for leftovers",
-    items: [
-      { ingredientId: "ing5", qty: 300 },
-      { ingredientId: "ing6", qty: 2 },
-      { ingredientId: "ing7", qty: 2 }
-    ]
-  },
-  {
-    id: "r3", name: "Weeknight chili", servings: 4, notes: "",
-    items: [
-      { ingredientId: "ing8", qty: 400 },
-      { ingredientId: "ing9", qty: 2 },
-      { ingredientId: "ing10", qty: 3 }
-    ]
-  }
-];
-
-// ---- Thin API layer: tries the real backend, falls back to mock --------
+// ---- Thin API layer --------------------------------------------------------
+// Throws on failure. err.status is set when the server answered with an error
+// (4xx/5xx); it's absent when the server couldn't be reached at all.
 async function apiRequest(path, options = {}) {
-  const res = await fetch(API_BASE + path, {
-    headers: { "Content-Type": "application/json" },
-    ...options
+  let res;
+  try {
+    res = await fetch(API_BASE + path, {
+      headers: { "Content-Type": "application/json" },
+      ...options
+    });
+  } catch (e) {
+    setServerReachable(false);
+    throw e;
+  }
+
+  if (res.ok) {
+    setServerReachable(true);
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  // The ReSeeP API always explains its own errors as {"error": "..."}.
+  let apiMessage = null;
+  try {
+    const body = await res.json();
+    if (body && body.error) apiMessage = body.error;
+  } catch (e) { /* not JSON: an HTML page from Payara itself */ }
+
+  if (apiMessage !== null || res.status >= 500) {
+    // The API answered (a validation/not-found/conflict error, or it crashed).
+    setServerReachable(true);
+    const err = new Error(apiMessage ?? `the server hit an internal error (HTTP ${res.status})`);
+    err.status = res.status; // callers can react to e.g. 401 or 409
+    throw err;
+  }
+
+  // No {"error"} body and not a crash: Payara answered for an app that isn't
+  // running (disabled or undeployed gives 403/404). Treat it like being down.
+  setServerReachable(false);
+  const err = new Error(`the ReSeeP API isn't available (HTTP ${res.status}) — is the app deployed and enabled in Payara?`);
+  err.unavailable = true;
+  throw err;
+}
+
+function setServerReachable(reachable) {
+  if (serverReachable === reachable) return;
+  serverReachable = reachable;
+  updateApiStatus();
+}
+
+// A user-facing explanation of a failed request.
+function errorMessage(e) {
+  if (e.status || e.unavailable) return e.message;
+  return "couldn't reach the server — check it's running and try again";
+}
+
+function saveRecipeApi(recipe) {
+  if (recipe.id && !recipe.id.toString().startsWith("new-")) {
+    return apiRequest(`/recipes/${recipe.id}`, { method: "PUT", body: JSON.stringify(recipe) });
+  }
+  // recipe.id is a temporary client-side placeholder like "new-172..." at
+  // this point — the backend assigns the real numeric id, so leave it out of
+  // the payload rather than sending a non-numeric string into a Long field.
+  const { id, ...payload } = recipe;
+  return apiRequest("/recipes", { method: "POST", body: JSON.stringify(payload) });
+}
+
+function deleteRecipeApi(id) {
+  return apiRequest(`/recipes/${id}`, { method: "DELETE" });
+}
+
+function savePantryItemApi(item) {
+  return apiRequest(`/pantry/${item.id}`, { method: "PUT", body: JSON.stringify(item) });
+}
+
+function createPantryItemApi(item) {
+  return apiRequest("/pantry", { method: "POST", body: JSON.stringify(item) }); // server-assigned id + saved fields
+}
+
+// ---- Shopping list API -----------------------------------------------------
+//   GET  {API_BASE}/shopping              -> [ShoppingItemDto]
+//   POST {API_BASE}/shopping/{id}/bought  -> ShoppingItemDto (409 if already bought)
+//   ShoppingItemDto { id, ingredientId, ingredientName, unit, qty,
+//                     status: "NEEDED"|"BOUGHT", addedByUsername,
+//                     boughtByUsername, boughtAt }
+
+// Map the server's field names onto the shorter ones this page uses.
+function normalizeShoppingItem(it) {
+  return {
+    ...it,
+    name: it.name ?? it.ingredientName,
+    addedBy: it.addedBy ?? it.addedByUsername,
+    boughtBy: it.boughtBy ?? it.boughtByUsername,
+  };
+}
+
+async function loadShopping() {
+  const data = await apiRequest("/shopping");
+  return (data || []).map(normalizeShoppingItem);
+}
+
+// Everything the views need, in one go. Throws if any part fails, leaving the
+// previous data in place.
+async function loadAll() {
+  const [r, p, s] = await Promise.all([apiRequest("/recipes"), apiRequest("/pantry"), loadShopping()]);
+  recipes = r || [];
+  ingredients = p || [];
+  shoppingItems = s;
+  hasLoadedOnce = true;
+  loadError = "";
+}
+
+async function markBoughtApi(id) {
+  const updated = await apiRequest(`/shopping/${id}/bought`, {
+    method: "POST",
+    body: JSON.stringify({ userId: currentUser.id }), // the server records who bought it
   });
-  if (!res.ok) throw new Error("Request failed: " + res.status);
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
-}
-
-async function loadRecipes() {
-  try {
-    const data = await apiRequest("/recipes");
-    usingLiveApi = true;
-    return data;
-  } catch (e) {
-    usingLiveApi = false;
-    return mockRecipes;
-  }
-}
-
-async function loadPantry() {
-  try {
-    const data = await apiRequest("/pantry");
-    usingLiveApi = true;
-    return data;
-  } catch (e) {
-    usingLiveApi = false;
-    return mockIngredients;
-  }
-}
-
-async function saveRecipeApi(recipe) {
-  try {
-    if (recipe.id && !recipe.id.toString().startsWith("new-")) {
-      return await apiRequest(`/recipes/${recipe.id}`, { method: "PUT", body: JSON.stringify(recipe) });
-    } else {
-      // recipe.id is a temporary client-side placeholder like "new-172..."
-      // at this point — the backend assigns the real numeric id, so leave
-      // it out of the payload entirely rather than sending a non-numeric
-      // string into a Long field.
-      const { id, ...payload } = recipe;
-      return await apiRequest("/recipes", { method: "POST", body: JSON.stringify(payload) });
-    }
-  } catch (e) {
-    return null; // falls back to local mutation of mock data
-  }
-}
-
-async function deleteRecipeApi(id) {
-  try {
-    await apiRequest(`/recipes/${id}`, { method: "DELETE" });
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-async function savePantryItemApi(item) {
-  try {
-    await apiRequest(`/pantry/${item.id}`, { method: "PUT", body: JSON.stringify(item) });
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-async function createPantryItemApi(item) {
-  try {
-    const created = await apiRequest("/pantry", { method: "POST", body: JSON.stringify(item) });
-    return created; // server-assigned id + the saved fields
-  } catch (e) {
-    return null; // caller falls back to a local-only id
-  }
+  return normalizeShoppingItem(updated);
 }
 
 // ---- App state ------------------------------------------------------------
 let recipes = [];
 let ingredients = [];
+let shoppingItems = [];
 let currentRecipe = null; // recipe object being edited, or null
 
 const el = (id) => document.getElementById(id);
@@ -649,21 +794,260 @@ function showToast(msg) {
   showToast._timer = setTimeout(() => t.classList.remove("show"), 2200);
 }
 
-// ---- Tabs ------------------------------------------------------------------
-document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => { b.classList.remove("active"); b.setAttribute("aria-selected","false"); });
-    btn.classList.add("active");
-    btn.setAttribute("aria-selected","true");
-    showView(btn.dataset.view);
-  });
+// ---- Inline validation -----------------------------------------------------
+// Problems with what the user typed are shown on the field itself (red
+// border + message under it) and checked before anything is sent, so the
+// server's 400s are only a backstop. Editing the field clears its error.
+
+// Where a field's message goes: inside its .field, or under its row for the
+// one-line forms (add ingredient, pantry rows).
+function errorHostFor(input) {
+  return input.closest(".field") || input.closest(".add-ingredient, .pantry-row, .ingredient-row") || input.parentElement;
+}
+
+let fieldErrorCount = 0;
+
+// Returns false so callers can `return showFieldError(...)`.
+function showFieldError(input, message) {
+  const host = errorHostFor(input);
+  let msg = host._errorEl;
+  if (!msg || !msg.isConnected) {
+    msg = document.createElement("p");
+    msg.className = "field-error";
+    msg.id = "field-error-" + (++fieldErrorCount);
+    msg.setAttribute("role", "alert");
+    if (host.classList.contains("field")) host.appendChild(msg);
+    else host.after(msg);
+    host._errorEl = msg;
+  }
+  msg.textContent = message;
+  msg.hidden = false;
+  input.setAttribute("aria-invalid", "true");
+  input.setAttribute("aria-describedby", msg.id);
+  input.focus();
+  return false;
+}
+
+function clearFieldError(input) {
+  input.removeAttribute("aria-invalid");
+  input.removeAttribute("aria-describedby");
+  const host = errorHostFor(input);
+  if (host._errorEl && !host.querySelector('[aria-invalid="true"]')) host._errorEl.hidden = true;
+}
+
+document.addEventListener("input", (e) => {
+  if (e.target.getAttribute?.("aria-invalid") === "true") clearFieldError(e.target);
 });
 
+// Reads a quantity box. Returns { value } or { error }.
+//   allowZero: is 0 acceptable (pantry stock) or not (an amount to use/buy)?
+//   emptyValue: if given, an empty box means this instead of an error.
+function readQty(input, { allowZero = true, emptyValue } = {}) {
+  if (input.validity?.badInput) return { error: "Enter a number" };
+  const raw = input.value.trim();
+  if (raw === "") {
+    return emptyValue !== undefined ? { value: emptyValue } : { error: "Enter a quantity" };
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return { error: "Enter a number" };
+  if (n < 0) return { error: "Quantity can't be negative" };
+  if (n === 0 && !allowZero) return { error: "Quantity must be more than 0" };
+  if (n > 1000000) return { error: "That quantity is too large" };
+  return { value: n };
+}
+
+function isDuplicateIngredientName(name) {
+  return ingredients.some((i) => i.name.trim().toLowerCase() === name.toLowerCase());
+}
+
+// ---- Sign-in and roles -----------------------------------------------------
+//   POST {API_BASE}/login  { username, password }  ->  { id, username, role }
+// role is "COOK" or "SHOPPER"; a wrong username/password is a 401.
+//
+// Hiding views by role is a convenience for the user, not security: the API
+// must check the role itself before allowing a write.
+const ROLE_VIEWS = {
+  COOK: ["recipes", "pantry", "plan", "shopping"],
+  SHOPPER: ["shopping", "pantry"],
+};
+const ROLE_LABELS = { COOK: "Cook", SHOPPER: "Shopper" };
+const SESSION_KEY = "reseep.user";
+
+let currentUser = loadSessionUser();
+let pendingRoute = null; // where a signed-out user was heading
+
+function loadSessionUser() {
+  try {
+    const user = JSON.parse(sessionStorage.getItem(SESSION_KEY));
+    return user && ROLE_VIEWS[user.role] ? user : null;
+  } catch (e) {
+    return null; // storage blocked or corrupt: just sign in again
+  }
+}
+
+function saveSessionUser(user) {
+  try {
+    if (user) sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    else sessionStorage.removeItem(SESSION_KEY);
+  } catch (e) { /* storage blocked: stays signed in until reload */ }
+}
+
+function loginApi(username, password) {
+  return apiRequest("/login", { method: "POST", body: JSON.stringify({ username, password }) });
+}
+
+function canView(view) {
+  return !!currentUser && ROLE_VIEWS[currentUser.role].includes(view);
+}
+
+function defaultRoute() {
+  return "#/" + ROLE_VIEWS[currentUser.role][0];
+}
+
+function updateUserBar() {
+  el("userBar").hidden = !currentUser;
+  el("mainNav").hidden = !currentUser;
+  if (!currentUser) return;
+  el("userBarName").textContent = currentUser.username;
+  el("userBarRole").textContent = ROLE_LABELS[currentUser.role];
+  document.querySelectorAll(".tab-btn").forEach((tab) => {
+    tab.hidden = !canView(tab.dataset.route);
+  });
+}
+
+function showLoginError(message) {
+  el("loginError").textContent = message || "";
+  el("loginError").hidden = !message;
+}
+
+el("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = el("fUsername").value.trim();
+  const password = el("fPassword").value;
+  showLoginError(null);
+  if (!username) return showFieldError(el("fUsername"), "Enter your username");
+  if (!password) return showFieldError(el("fPassword"), "Enter your password");
+
+  el("btnSignIn").disabled = true;
+  try {
+    const user = await loginApi(username, password);
+    user.role = String(user.role).toUpperCase();
+    if (!ROLE_VIEWS[user.role]) throw new Error("This account has no access to the web app.");
+
+    currentUser = user;
+    saveSessionUser(user);
+    el("loginForm").reset();
+    showLoginError(null);
+    updateUserBar();
+    showToast(`Signed in as ${user.username}`);
+
+    const target = pendingRoute && canView(routeView(pendingRoute)) ? pendingRoute : defaultRoute();
+    pendingRoute = null;
+    navigate(target);
+  } catch (err) {
+    showLoginError(err.status ? err.message : "Couldn't sign in: " + errorMessage(err) + ".");
+  } finally {
+    el("btnSignIn").disabled = false;
+  }
+});
+
+el("btnSignOut").addEventListener("click", () => {
+  currentUser = null;
+  saveSessionUser(null);
+  updateUserBar();
+  showToast("Signed out");
+  navigate("#/login");
+});
+
+// ---- Routing ---------------------------------------------------------------
+// Each view has its own URL hash so it can be linked, bookmarked and reloaded:
+//   #/login            sign in (the only view while signed out)
+//   #/recipes          recipe list
+//   #/recipes/new      new recipe
+//   #/recipes/{id}     edit a recipe
+//   #/pantry           pantry
+//   #/plan             meal plan
+//   #/shopping         shopping list
+// Which of these a user can open depends on their role (ROLE_VIEWS).
+const TOP_LEVEL_VIEWS = ["recipes", "pantry", "plan", "shopping"];
+
 function showView(name) {
-  ["recipes","pantry","detail"].forEach((v) => {
+  ["login", ...TOP_LEVEL_VIEWS, "detail"].forEach((v) => {
     el("view-" + v).hidden = (v !== name);
   });
 }
+
+function routeView(hash) {
+  return hash.replace(/^#\/?/, "").split("/")[0];
+}
+
+function setActiveTab(route) {
+  document.querySelectorAll(".tab-btn").forEach((tab) => {
+    const active = tab.dataset.route === route;
+    tab.classList.toggle("active", active);
+    if (active) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  });
+}
+
+function navigate(hash) {
+  if (location.hash === hash) router(); // same hash fires no hashchange
+  else location.hash = hash;
+}
+
+function router() {
+  const [view, param] = location.hash.replace(/^#\/?/, "").split("/");
+
+  if (!currentUser) {
+    if (view !== "login") pendingRoute = location.hash; // come back here after signing in
+    history.replaceState(null, "", "#/login");
+    currentRecipe = null;
+    setActiveTab(null);
+    showView("login");
+    el("fUsername").focus();
+    return;
+  }
+
+  if (view === "login" || !TOP_LEVEL_VIEWS.includes(view)) {
+    history.replaceState(null, "", defaultRoute()); // already signed in, or unknown/empty hash
+    router();
+    return;
+  }
+
+  if (!canView(view)) {
+    showToast(`The ${ROLE_LABELS[currentUser.role]} role can't open that page`);
+    history.replaceState(null, "", defaultRoute());
+    router();
+    return;
+  }
+
+  if (view === "recipes" && param) {
+    const found = param === "new" ? openNewRecipe() : openRecipeDetail(normalizeId(param));
+    if (!found && !hasLoadedOnce) {
+      // Nothing loaded yet, so we can't tell; keep the URL and show the list
+      // (with its "hasn't loaded" message). refreshFromServer re-routes later.
+      setActiveTab("recipes");
+      showView("recipes");
+      return;
+    }
+    if (!found) {
+      showToast("That recipe doesn't exist");
+      navigate("#/recipes");
+      return;
+    }
+    setActiveTab("recipes");
+    showView("detail");
+    return;
+  }
+
+  currentRecipe = null; // leaving the editor discards unsaved changes, as before
+  if (view === "shopping") renderShopping(); // its buttons depend on who's signed in
+  if (view === "plan") renderPlan(null); // pantry or list may have changed elsewhere; clear old result
+  setActiveTab(view);
+  showView(view);
+}
+
+window.addEventListener("hashchange", router);
 
 // ---- Rendering: recipe list --------------------------------------------
 function missingForRecipe(recipe) {
@@ -682,6 +1066,10 @@ function renderRecipeList() {
   const container = el("recipeList");
   container.innerHTML = "";
 
+  if (!hasLoadedOnce) {
+    container.innerHTML = notLoadedHtml("Your recipe list");
+    return;
+  }
   if (recipes.length === 0) {
     container.innerHTML = `
       <div class="card empty-state">
@@ -693,8 +1081,9 @@ function renderRecipeList() {
 
   recipes.forEach((recipe) => {
     const missing = missingForRecipe(recipe);
-    const card = document.createElement("div");
+    const card = document.createElement("a");
     card.className = "card recipe-card";
+    card.href = `#/recipes/${encodeURIComponent(recipe.id)}`;
     card.innerHTML = `
       <div class="recipe-card-top">
         <div>
@@ -706,7 +1095,6 @@ function renderRecipeList() {
           : `<span class="badge badge-missing">${missing.length} missing</span>`}
       </div>
     `;
-    card.addEventListener("click", () => openRecipeDetail(recipe.id));
     container.appendChild(card);
   });
 }
@@ -718,19 +1106,19 @@ function escapeHtml(str) {
 }
 
 // ---- Recipe detail view --------------------------------------------------
+// Called by the router; returns false if there's no such recipe.
 function openRecipeDetail(id) {
   const recipe = recipes.find((r) => r.id === id);
+  if (!recipe) return false;
   currentRecipe = JSON.parse(JSON.stringify(recipe)); // work on a copy
   renderDetail(false);
-  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  showView("detail");
+  return true;
 }
 
 function openNewRecipe() {
   currentRecipe = { id: "new-" + Date.now(), name: "", servings: 2, notes: "", items: [] };
   renderDetail(true);
-  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-  showView("detail");
+  return true;
 }
 
 function renderDetail(isNew) {
@@ -739,6 +1127,10 @@ function renderDetail(isNew) {
   el("fRecipeServings").value = currentRecipe.servings;
   el("fRecipeNotes").value = currentRecipe.notes || "";
   el("btnDeleteRecipe").style.visibility = isNew ? "hidden" : "visible";
+  el("btnPlanRecipe").hidden = isNew; // only a saved recipe can be planned
+  // A fresh editor shouldn't show errors from the last recipe.
+  ["fRecipeName", "fRecipeServings", "addIngredientQty"].forEach((id) => clearFieldError(el(id)));
+  el("recipeFormError").hidden = true;
 
   renderIngredientRows();
   renderAddIngredientSelect();
@@ -804,16 +1196,17 @@ el("btnAddIngredient").addEventListener("click", () => {
   const qtyInput = el("addIngredientQty");
   const ingId = select.value;
   if (!ingId) return;
-  const qty = Number(qtyInput.value) || 1;
-  currentRecipe.items.push({ ingredientId: normalizeId(ingId), qty });
+  const qty = readQty(qtyInput, { allowZero: false });
+  if (qty.error) return showFieldError(qtyInput, qty.error);
+  currentRecipe.items.push({ ingredientId: normalizeId(ingId), qty: qty.value });
   qtyInput.value = "";
   renderIngredientRows();
   renderAddIngredientSelect();
   renderMissingPanel();
 });
 
-// An id from the backend is a number (Long); an id made up locally before a
-// server exists is a string like "ing1". Keep whichever form it already is.
+// Ids from the backend are numbers (Long), but dataset/hash values are always
+// strings; anything non-numeric (e.g. a "new-…" placeholder) stays a string.
 function normalizeId(id) {
   return /^\d+$/.test(id) ? Number(id) : id;
 }
@@ -835,6 +1228,8 @@ function hideNewIngredientForm() {
   el("newRecipeIngredientName").value = "";
   el("newRecipeIngredientUnit").value = "";
   el("newRecipeIngredientQty").value = "";
+  clearFieldError(el("newRecipeIngredientName"));
+  clearFieldError(el("newRecipeIngredientQty"));
 }
 
 el("btnConfirmNewIngredient").addEventListener("click", async () => {
@@ -843,25 +1238,27 @@ el("btnConfirmNewIngredient").addEventListener("click", async () => {
   const qtyInput = el("newRecipeIngredientQty");
 
   const name = nameInput.value.trim();
-  if (!name) {
-    showToast("Give the ingredient a name first");
-    nameInput.focus();
-    return;
+  if (!name) return showFieldError(nameInput, "Give the ingredient a name");
+  if (isDuplicateIngredientName(name)) {
+    return showFieldError(nameInput, "Already in your pantry — pick it from the list above");
   }
-  if (ingredients.some((i) => i.name.toLowerCase() === name.toLowerCase())) {
-    showToast("That ingredient is already in your pantry — pick it from the list above");
-    return;
-  }
+  const qty = readQty(qtyInput, { allowZero: false });
+  if (qty.error) return showFieldError(qtyInput, qty.error + " (how much the recipe needs)");
 
-  const recipeQty = Number(qtyInput.value) || 1;
+  const recipeQty = qty.value;
   const newPantryItem = {
     name,
     unit: unitInput.value.trim() || "unit",
     qtyOnHand: 0 // it's new, so assume none on hand yet — edit it from the Pantry tab once you actually have some
   };
 
-  const created = await createPantryItemApi(newPantryItem);
-  const ingredient = created || { id: "ing" + Date.now(), ...newPantryItem };
+  let ingredient;
+  try {
+    ingredient = await createPantryItemApi(newPantryItem);
+  } catch (e) {
+    showToast("Couldn't add the ingredient: " + errorMessage(e));
+    return; // keep the form filled in so they can try again
+  }
   ingredients.push(ingredient);
 
   currentRecipe.items.push({ ingredientId: normalizeId(ingredient.id), qty: recipeQty });
@@ -870,7 +1267,7 @@ el("btnConfirmNewIngredient").addEventListener("click", async () => {
   renderIngredientRows();
   renderAddIngredientSelect();
   renderMissingPanel();
-  showToast(created ? "Ingredient added to pantry and recipe" : "Added locally (no server connected)");
+  showToast("Ingredient added to pantry and recipe");
 });
 
 function renderMissingPanel() {
@@ -900,54 +1297,77 @@ function renderMissingPanel() {
   }
 }
 
-el("btnNewRecipe").addEventListener("click", openNewRecipe);
+el("btnNewRecipe").addEventListener("click", () => navigate("#/recipes/new"));
 el("btnBackToList").addEventListener("click", backToRecipes);
 el("btnCancelDetail").addEventListener("click", backToRecipes);
 
 function backToRecipes() {
-  currentRecipe = null;
-  document.querySelector('.tab-btn[data-view="recipes"]').classList.add("active");
-  document.querySelector('.tab-btn[data-view="recipes"]').setAttribute("aria-selected","true");
-  showView("recipes");
+  navigate("#/recipes");
 }
 
 el("btnSaveRecipe").addEventListener("click", async () => {
-  const name = el("fRecipeName").value.trim();
-  if (!name) {
-    showToast("Give the recipe a title before saving");
-    el("fRecipeName").focus();
-    return;
+  el("recipeFormError").hidden = true;
+
+  const nameInput = el("fRecipeName");
+  const name = nameInput.value.trim();
+  if (!name) return showFieldError(nameInput, "Give the recipe a title");
+
+  const servingsInput = el("fRecipeServings");
+  const servings = Number(servingsInput.value);
+  if (servingsInput.validity.badInput || servingsInput.value.trim() === "") {
+    return showFieldError(servingsInput, "Enter how many it serves");
   }
+  if (!Number.isInteger(servings) || servings < 1) {
+    return showFieldError(servingsInput, "Use a whole number, 1 or more");
+  }
+
+  // Each ingredient line needs a real amount; a 0 or blank line would make
+  // the "what's missing" check and planning meaningless.
+  for (const input of el("ingredientRows").querySelectorAll(".qtyInput")) {
+    const qty = readQty(input, { allowZero: false });
+    if (qty.error) return showFieldError(input, qty.error);
+  }
+
   currentRecipe.name = name;
-  currentRecipe.servings = Math.max(1, Number(el("fRecipeServings").value) || 1);
+  currentRecipe.servings = servings;
   currentRecipe.notes = el("fRecipeNotes").value.trim();
 
-  const isNew = currentRecipe.id.toString().startsWith("new-");
-  const saved = await saveRecipeApi(currentRecipe);
-
-  if (saved) {
-    currentRecipe.id = saved.id; // adopt the real database id (critical for a brand-new recipe)
-  } else if (isNew) {
-    currentRecipe.id = "r" + Date.now(); // local-only placeholder, no server reachable
+  let saved;
+  el("btnSaveRecipe").disabled = true;
+  try {
+    saved = await saveRecipeApi(currentRecipe);
+  } catch (e) {
+    // Stay in the editor with their changes so they can fix it or retry;
+    // put the reason next to the Save button as well as in a toast.
+    el("recipeFormError").textContent = "Couldn't save the recipe: " + errorMessage(e);
+    el("recipeFormError").hidden = false;
+    showToast("Couldn't save the recipe");
+    return;
+  } finally {
+    el("btnSaveRecipe").disabled = false;
   }
 
-  if (isNew) {
-    recipes.push(currentRecipe);
-  } else {
-    const i = recipes.findIndex((r) => r.id === currentRecipe.id);
-    recipes[i] = currentRecipe;
-  }
+  // Use what the server stored (it assigns the id for a new recipe).
+  const i = recipes.findIndex((r) => r.id === saved.id);
+  if (i === -1) recipes.push(saved);
+  else recipes[i] = saved;
 
-  showToast(saved ? "Recipe saved" : "Recipe saved locally (no server connected)");
+  showToast("Recipe saved");
   renderRecipeList();
   backToRecipes();
 });
 
 el("btnDeleteRecipe").addEventListener("click", async () => {
   if (!confirm(`Delete "${currentRecipe.name}"? This can't be undone.`)) return;
-  const deletedOnServer = await deleteRecipeApi(currentRecipe.id);
-  recipes = recipes.filter((r) => r.id !== currentRecipe.id);
-  showToast(deletedOnServer ? "Recipe deleted" : "Recipe deleted locally (no server connected)");
+  const id = currentRecipe.id;
+  try {
+    await deleteRecipeApi(id);
+  } catch (e) {
+    showToast("Couldn't delete the recipe: " + errorMessage(e));
+    return;
+  }
+  recipes = recipes.filter((r) => r.id !== id);
+  showToast("Recipe deleted");
   renderRecipeList();
   backToRecipes();
 });
@@ -957,6 +1377,10 @@ function renderPantry() {
   const container = el("pantryRows");
   container.innerHTML = "";
 
+  if (!hasLoadedOnce) {
+    container.innerHTML = `<p class="recipe-meta" style="padding:6px 0;">The pantry hasn't loaded — the server couldn't be reached.</p>`;
+    return;
+  }
   if (ingredients.length === 0) {
     container.innerHTML = `<p class="recipe-meta" style="padding:6px 0;">Your pantry is empty.</p>`;
     return;
@@ -979,9 +1403,21 @@ function renderPantry() {
       const id = normalizeId(e.target.dataset.id); // dataset values are always strings; ingredient ids from the backend are numbers
       const ing = findIngredient(id);
       if (!ing) return; // shouldn't happen, but avoid crashing on a stale row
-      ing.qtyOnHand = Number(e.target.value) || 0;
-      const savedOnServer = await savePantryItemApi(ing);
-      showToast(savedOnServer ? "Pantry updated" : "Updated locally (no server connected)");
+      // Leave a bad value in the box (marked) so they can see and fix it;
+      // nothing is sent and the saved quantity is unchanged.
+      const qty = readQty(e.target, { allowZero: true });
+      if (qty.error) return showFieldError(e.target, qty.error);
+      const qtyOnHand = qty.value;
+      try {
+        const saved = await savePantryItemApi({ ...ing, qtyOnHand });
+        Object.assign(ing, saved || { qtyOnHand });
+      } catch (err) {
+        if (err.status === 400) return showFieldError(e.target, err.message); // server rejected the value
+        e.target.value = ing.qtyOnHand; // put back the value the server still has
+        showToast("Couldn't update the pantry: " + errorMessage(err));
+        return;
+      }
+      showToast("Pantry updated");
       renderRecipeList(); // missing-ingredient badges may have changed
     });
   });
@@ -992,37 +1428,486 @@ el("btnAddPantryItem").addEventListener("click", async () => {
   const unitInput = el("newIngredientUnit");
   const qtyInput = el("newIngredientQty");
   const name = nameInput.value.trim();
-  if (!name) {
-    showToast("Give the ingredient a name first");
-    nameInput.focus();
-    return;
+  if (!name) return showFieldError(nameInput, "Give the ingredient a name");
+  if (isDuplicateIngredientName(name)) {
+    return showFieldError(nameInput, "Already in your pantry — change its quantity above instead");
   }
+  const qty = readQty(qtyInput, { allowZero: true, emptyValue: 0 }); // blank = none on hand yet
+  if (qty.error) return showFieldError(qtyInput, qty.error);
 
   const newItem = {
     name,
     unit: unitInput.value.trim() || "unit",
-    qtyOnHand: Number(qtyInput.value) || 0
+    qtyOnHand: qty.value
   };
 
-  const created = await createPantryItemApi(newItem);
-  ingredients.push(created || { id: "ing" + Date.now(), ...newItem });
+  let created;
+  try {
+    created = await createPantryItemApi(newItem);
+  } catch (e) {
+    showToast("Couldn't add to the pantry: " + errorMessage(e));
+    return; // keep what they typed
+  }
+  ingredients.push(created);
 
   nameInput.value = "";
   unitInput.value = "";
   qtyInput.value = "";
   renderPantry();
-  showToast(created ? "Added to pantry" : "Added locally (no server connected)");
+  showToast("Added to pantry");
 });
 
+// ---- Meal plan: "Plan this recipe" -----------------------------------------
+//   POST {API_BASE}/recipes/{id}/plan  ->  [ShoppingItem]  (the items it added)
+// The server compares the recipe with the pantry and adds each shortfall to
+// the shopping list. An empty array means nothing was missing. The "would
+// add" preview below assumes the server subtracts what's already on the list
+// as NEEDED, so planning twice doesn't double up.
+
+// What planning this recipe would add, given the pantry and current list.
+function planShortfall(recipe) {
+  const out = [];
+  recipe.items.forEach((item) => {
+    const ing = findIngredient(item.ingredientId);
+    if (!ing) return;
+    const alreadyListed = shoppingItems
+      .filter((s) => s.ingredientId === item.ingredientId && String(s.status).toUpperCase() !== "BOUGHT")
+      .reduce((sum, s) => sum + (Number(s.qty) || 0), 0);
+    const short = item.qty - ing.qtyOnHand - alreadyListed;
+    if (short > 0) out.push({ ingredientId: ing.id, name: ing.name, unit: ing.unit, qty: short });
+  });
+  return out;
+}
+
+async function planRecipeApi(recipe) {
+  const added = await apiRequest(`/recipes/${recipe.id}/plan`, {
+    method: "POST",
+    body: JSON.stringify({ userId: currentUser.id }), // the server records who added it
+  });
+  try {
+    shoppingItems = await loadShopping(); // pick up the server's view of the list
+  } catch (e) { /* the plan succeeded; the live update will refresh the list */ }
+  return (added || []).map(normalizeShoppingItem);
+}
+
+async function planRecipe(recipeId, btn) {
+  const recipe = recipes.find((r) => r.id === recipeId);
+  if (!recipe) return;
+  if (btn) btn.disabled = true;
+
+  let added;
+  try {
+    added = await planRecipeApi(recipe);
+  } catch (e) {
+    showToast("Couldn't plan the recipe: " + errorMessage(e));
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  const message = added.length === 0
+    ? `Nothing to buy for ${recipe.name} — you have everything, or it's already on the list.`
+    : `Added ${added.length} item${added.length === 1 ? "" : "s"} for ${recipe.name}: ` +
+      added.map((a) => `${a.name} ${a.qty} ${a.unit}`).join(", ");
+
+  showToast(added.length ? `Added ${added.length} item${added.length === 1 ? "" : "s"} to the shopping list` : "Nothing to add");
+  renderShopping();
+  renderPlan({ text: message, showLink: added.length > 0 });
+  if (btn) btn.disabled = false;
+}
+
+function renderPlan(result) {
+  if (result !== undefined) {
+    el("planNotice").hidden = !result;
+    if (result) {
+      el("planNoticeText").textContent = result.text;
+      el("planNoticeLink").hidden = !result.showLink;
+    }
+  }
+
+  const rows = recipes.map((r) => ({ recipe: r, toAdd: planShortfall(r), missing: missingForRecipe(r) }));
+  const ready = rows.filter((r) => r.missing.length === 0).length;
+  el("planSummary").textContent = recipes.length ? `${ready} ready · ${recipes.length - ready} need shopping` : "";
+
+  const container = el("planList");
+  container.innerHTML = "";
+  if (!hasLoadedOnce) {
+    container.innerHTML = notLoadedHtml("The meal plan");
+    return;
+  }
+  if (recipes.length === 0) {
+    container.innerHTML = `
+      <div class="card empty-state">
+        <strong>No recipes to plan</strong>
+        Add a recipe first, then plan it here.
+      </div>`;
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.style.paddingLeft = "32px";
+  rows.forEach(({ recipe, toAdd, missing }) => {
+    let detail, badge;
+    if (missing.length === 0) {
+      detail = `serves ${recipe.servings} · everything is in the pantry`;
+      badge = `<span class="badge badge-ok">Ready to cook</span>`;
+    } else if (toAdd.length === 0) {
+      detail = `short on ${missing.map((m) => m.name).join(", ")} · already on the shopping list`;
+      badge = `<span class="badge badge-todo">On the list</span>`;
+    } else {
+      detail = `would add ${toAdd.map((a) => `${a.name} ${a.qty} ${a.unit}`).join(", ")}`;
+      badge = `<span class="badge badge-missing">${missing.length} missing</span>`;
+    }
+    const row = document.createElement("div");
+    row.className = "pantry-row";
+    row.innerHTML = `
+      <span class="pantry-name"><a href="#/recipes/${encodeURIComponent(recipe.id)}">${escapeHtml(recipe.name)}</a><small>${escapeHtml(detail)}</small></span>
+      ${badge}
+      <button class="btn btn-primary btn-small btnPlan" data-id="${escapeHtml(String(recipe.id))}"${toAdd.length ? "" : " disabled"}>Plan</button>
+    `;
+    card.appendChild(row);
+  });
+  container.appendChild(card);
+
+  container.querySelectorAll(".btnPlan").forEach((btn) => {
+    btn.addEventListener("click", () => planRecipe(normalizeId(btn.dataset.id), btn));
+  });
+}
+
+el("btnPlanRecipe").addEventListener("click", () => {
+  if (currentRecipe) planRecipe(currentRecipe.id, el("btnPlanRecipe"));
+});
+
+// ---- Shopping list view ----------------------------------------------------
+// The Cook sees what's needed and who bought what; the Shopper can also tick
+// items off. Buying an item adds its qty to the pantry (done on the server
+// side by the purchase consumer, which then triggers a pantry live update).
+function formatTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderShopping() {
+  const items = shoppingItems.map((it) => ({ ...it, status: String(it.status).toUpperCase() }));
+  const needed = items.filter((it) => it.status !== "BOUGHT");
+  const bought = items.filter((it) => it.status === "BOUGHT")
+    .sort((a, b) => String(b.boughtAt).localeCompare(String(a.boughtAt)));
+
+  el("shoppingCount").textContent = needed.length || "";
+  el("shoppingSummary").textContent = items.length
+    ? `${needed.length} to buy · ${bought.length} bought`
+    : "";
+
+  const container = el("shoppingList");
+  container.innerHTML = "";
+
+  if (!hasLoadedOnce) {
+    container.innerHTML = notLoadedHtml("The shopping list");
+    return;
+  }
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div class="card empty-state">
+        <strong>The shopping list is empty</strong>
+        Items appear here when a planned recipe needs something the pantry doesn't have.
+      </div>`;
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.style.paddingLeft = "32px";
+  if (needed.length) card.appendChild(renderShoppingGroup("To buy", needed));
+  if (bought.length) card.appendChild(renderShoppingGroup("Bought", bought));
+  container.appendChild(card);
+}
+
+function renderShoppingGroup(title, items) {
+  const group = document.createElement("div");
+  group.className = "shopping-group";
+  group.innerHTML = `<h3 class="section-label">${title}</h3>`;
+  const isShopper = currentUser && currentUser.role === "SHOPPER";
+
+  items.forEach((it) => {
+    const ing = findIngredient(it.ingredientId);
+    const name = it.name ?? ing?.name ?? "Unknown ingredient";
+    const unit = it.unit ?? ing?.unit ?? "";
+    const isBought = it.status === "BOUGHT";
+
+    const detail = isBought
+      ? `bought by ${it.boughtBy ?? "someone"}${it.boughtAt ? " · " + formatTime(it.boughtAt) : ""}`
+      : `added by ${it.addedBy ?? "someone"}${ing ? ` · ${ing.qtyOnHand} ${ing.unit} in pantry` : ""}`;
+
+    let action;
+    if (isBought) action = `<span class="badge badge-ok">Bought</span>`;
+    else if (isShopper) action = `<button class="btn btn-primary btn-small btnMarkBought" data-id="${escapeHtml(String(it.id))}">Mark bought</button>`;
+    else action = `<span class="badge badge-todo">To buy</span>`;
+
+    const row = document.createElement("div");
+    row.className = "pantry-row shopping-row" + (isBought ? " bought" : "")
+      + (recentlyChangedIds.has(it.id) ? " just-changed" : "");
+    row.innerHTML = `
+      <span class="pantry-name">${escapeHtml(name)}<small>${escapeHtml(detail)}</small></span>
+      <span class="pantry-qty">${escapeHtml(String(it.qty))} ${escapeHtml(unit)}</span>
+      ${action}
+    `;
+    group.appendChild(row);
+  });
+
+  group.querySelectorAll(".btnMarkBought").forEach((btn) => {
+    btn.addEventListener("click", () => markBought(normalizeId(btn.dataset.id), btn));
+  });
+  return group;
+}
+
+async function markBought(id, btn) {
+  const item = shoppingItems.find((it) => it.id === id);
+  if (!item) return;
+  btn.disabled = true; // stop double-clicks sending two requests
+
+  try {
+    Object.assign(item, await markBoughtApi(id));
+    showToast(`${item.name ?? "Item"} marked as bought`);
+  } catch (e) {
+    if (e.status === 409) {
+      showToast("Someone already bought that — list updated");
+      try { shoppingItems = await loadShopping(); } catch (e2) { /* live update will catch up */ }
+    } else {
+      showToast("Couldn't mark it bought: " + errorMessage(e));
+      btn.disabled = false;
+      return;
+    }
+  }
+  renderShopping();
+  renderPantryKeepingFocus();
+  renderRecipeList(); // "Ready to cook" may have changed
+}
+
+el("btnRetryLoad").addEventListener("click", async () => {
+  el("btnRetryLoad").disabled = true;
+  const ok = await refreshFromServer("Loaded the latest data");
+  el("btnRetryLoad").disabled = false;
+  if (!ok) showToast("Still can't reach the server");
+});
+
+// ---- Live updates (WebSocket) ----------------------------------------------
+// The server pushes a small {type, action, id} message after every committed
+// change to the pantry or recipes. We don't trust the message for data —
+// we just re-fetch over REST, so the API stays the single source of truth.
+// "http://host/reseep/api" -> "ws://host/reseep/ws/updates"
+const WS_URL = API_BASE.replace(/^http/, "ws").replace(/\/api\/?$/, "") + "/ws/updates";
+const MIN_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 10000;
+
+let reconnectDelay = MIN_RECONNECT_DELAY;
+let liveConnectedBefore = false;
+let refreshTimer = null;
+
+function setLiveStatus(state) {
+  const labels = {
+    live: "Live updates on",
+    reconnecting: `Live updates lost — retrying in ${Math.round(reconnectDelay / 1000)}s`,
+    disabled: "Live updates off (?live=off) — reload to see others' changes",
+  };
+  el("liveDot").className = "status-dot" + (state === "live" ? " live" : " offline");
+  el("liveStatusText").textContent = labels[state];
+}
+
+function connectLiveUpdates() {
+  const socket = new WebSocket(WS_URL);
+  window.liveSocket = socket; // lets you run liveSocket.close() in the console to test reconnects
+
+  socket.onopen = () => {
+    reconnectDelay = MIN_RECONNECT_DELAY;
+    setLiveStatus("live");
+    // Anything that changed while we were disconnected was never pushed to
+    // us, so reload the full current state. Also covers the case where the
+    // server was down when the page first loaded.
+    if (liveConnectedBefore || !hasLoadedOnce) {
+      refreshFromServer("Reconnected — showing latest data");
+    }
+    liveConnectedBefore = true;
+  };
+
+  socket.onmessage = (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    if (msg.type === "pantry-updated" || msg.type === "recipe-updated" || msg.type === "shopping-updated") {
+      scheduleRefresh();
+    }
+  };
+
+  // onerror is always followed by onclose, so retrying lives here only.
+  socket.onclose = () => {
+    setLiveStatus("reconnecting");
+    setTimeout(connectLiveUpdates, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+  };
+}
+
+// Several changes can land together (e.g. a recipe save that also added a
+// pantry item), so coalesce them into one refresh.
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => refreshFromServer(), 150);
+}
+
+// Ids of shopping items that changed in the last refresh; renderShopping
+// highlights them. Cleared after the highlight has played.
+let recentlyChangedIds = new Set();
+let recentlyChangedTimer = null;
+
+// Compare the list before and after a refresh: what did *other* users add or
+// buy? Our own actions already got a toast when we did them.
+function describeShoppingChanges(before, after) {
+  const prev = new Map(before.map((it) => [it.id, it]));
+  const me = currentUser ? currentUser.username : null;
+  const added = [], bought = [];
+
+  after.forEach((it) => {
+    const old = prev.get(it.id);
+    const nowBought = String(it.status).toUpperCase() === "BOUGHT";
+    if (!old) {
+      added.push(it);
+    } else if (nowBought && String(old.status).toUpperCase() !== "BOUGHT") {
+      bought.push(it);
+    } else if (!nowBought && Number(old.qty) !== Number(it.qty)) {
+      added.push(it); // planned again: qty went up on an existing item
+    }
+  });
+
+  const changedIds = [...added, ...bought].map((it) => it.id);
+  const byOthersAdded = added.filter((it) => it.addedBy !== me);
+  const byOthersBought = bought.filter((it) => it.boughtBy !== me);
+
+  const parts = [];
+  if (byOthersBought.length === 1) {
+    parts.push(`${byOthersBought[0].boughtBy ?? "Someone"} bought ${byOthersBought[0].name}`);
+  } else if (byOthersBought.length > 1) {
+    parts.push(`${byOthersBought.length} items were bought`);
+  }
+  if (byOthersAdded.length) {
+    const who = byOthersAdded[0].addedBy ?? "Someone";
+    parts.push(`${who} added ${byOthersAdded.length} item${byOthersAdded.length === 1 ? "" : "s"} to the shopping list`);
+  }
+  return { changedIds, message: parts.join(" · ") };
+}
+
+// Reload everything and redraw. Returns false if the server couldn't be
+// loaded (the banner then explains; the previous data stays on screen).
+async function refreshFromServer(toastMsg) {
+  const before = shoppingItems;
+  const hadData = hasLoadedOnce;
+  try {
+    await loadAll();
+  } catch (e) {
+    loadError = "Couldn't load the latest data: " + errorMessage(e) +
+      ". Changes can't be saved until the server is back; this page reloads by itself when it is.";
+    updateApiStatus();
+    return false;
+  }
+
+  // The first successful load isn't "someone changed something".
+  let changeMessage = "";
+  if (hadData) {
+    const { changedIds, message } = describeShoppingChanges(before, shoppingItems);
+    changeMessage = message;
+    if (changedIds.length) {
+      recentlyChangedIds = new Set(changedIds);
+      clearTimeout(recentlyChangedTimer);
+      recentlyChangedTimer = setTimeout(() => { recentlyChangedIds = new Set(); }, 3000);
+    }
+  }
+
+  updateApiStatus();
+  renderRecipeList();
+  renderPantryKeepingFocus();
+  renderShopping();
+  renderPlan(); // keeps any "Added …" result on screen
+  if (!toastMsg && changeMessage) toastMsg = changeMessage;
+
+  // Data just arrived for the first time (server was down at start): show
+  // the view the URL asks for, e.g. a #/recipes/{id} that couldn't open yet.
+  if (!hadData) {
+    router();
+    if (toastMsg) showToast(toastMsg);
+    return true;
+  }
+
+  // If the recipe being edited was deleted by another user, say so rather
+  // than letting a later save fail with a confusing 404.
+  const editing = currentRecipe && !el("view-detail").hidden;
+  if (editing && !currentRecipe.id.toString().startsWith("new-")) {
+    if (!recipes.some((r) => r.id === currentRecipe.id)) {
+      showToast("This recipe was deleted by another user");
+      backToRecipes();
+      return true;
+    }
+    renderMissingPanel(); // pantry quantities may have changed
+  }
+  if (toastMsg) showToast(toastMsg);
+  return true;
+}
+
+// Re-rendering the pantry rebuilds its inputs, which would kick the user out
+// of a box they're typing in. Put focus (and their unsaved value) back.
+function renderPantryKeepingFocus() {
+  const active = document.activeElement;
+  const focusedId = active && active.classList.contains("pantryQtyInput") ? active.dataset.id : null;
+  const typedValue = focusedId ? active.value : null;
+  renderPantry();
+  if (focusedId) {
+    const input = document.querySelector(`.pantryQtyInput[data-id="${focusedId}"]`);
+    if (input) { input.value = typedValue; input.focus(); }
+  }
+}
+
 // ---- Boot ------------------------------------------------------------------
-async function init() {
-  [recipes, ingredients] = await Promise.all([loadRecipes(), loadPantry()]);
-  el("apiDot").classList.toggle("live", usingLiveApi);
-  el("apiStatusText").textContent = usingLiveApi
+function updateApiStatus() {
+  el("apiDot").classList.toggle("live", serverReachable);
+  el("apiDot").classList.toggle("offline", !serverReachable);
+  el("apiStatusText").textContent = serverReachable
     ? `Connected to ${API_BASE}`
-    : `No server at ${API_BASE} — showing sample data`;
+    : `Can't reach ${API_BASE}`;
+  // Also show the banner (with Try again) when a single request finds the
+  // API gone, not just when a full reload fails.
+  const message = loadError || (serverReachable ? "" :
+    "Lost contact with the server — changes can't be saved right now. This page reloads by itself when it's back.");
+  el("serverNotice").hidden = !message;
+  el("serverNoticeText").textContent = message;
+}
+
+// Shown in place of a view's contents until the first load succeeds, so an
+// unreachable server doesn't look like "you have no recipes".
+function notLoadedHtml(what) {
+  return `
+    <div class="card empty-state">
+      <strong>${what} hasn't loaded</strong>
+      The server couldn't be reached — see the message above.
+    </div>`;
+}
+
+async function init() {
+  updateUserBar(); // a user restored from sessionStorage needs the header and tabs too
+  try {
+    await loadAll();
+  } catch (e) {
+    loadError = "Couldn't load data from the server: " + errorMessage(e) +
+      ". This page reloads by itself when the server is back.";
+  }
+  updateApiStatus();
   renderRecipeList();
   renderPantry();
+  renderShopping();
+  router(); // after loading, so #/recipes/{id} can find its recipe
+  // ?live=off runs the page on REST alone, to show it still works when the
+  // WebSocket is unavailable.
+  if (new URLSearchParams(location.search).get("live") === "off") {
+    setLiveStatus("disabled");
+  } else {
+    connectLiveUpdates();
+  }
 }
 
 init();

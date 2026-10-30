@@ -14,6 +14,13 @@
         -->
         <jta-data-source>jdbc/ReSeePPool</jta-data-source>
 
+        <!-- The reseep-consumer process updates ingredient.qty_on_hand with
+             plain JDBC, behind EclipseLink's back. With the default shared
+             (second-level) cache the web app would keep serving and
+             writing back  the stale cached quantities, so it's disabled
+             and every request reads fresh rows from the database. -->
+        <shared-cache-mode>NONE</shared-cache-mode>
+
         <properties>
             <!-- We manage the schema ourselves via db/schema.sql, so EclipseLink
                  should not try to create or alter tables on startup. -->

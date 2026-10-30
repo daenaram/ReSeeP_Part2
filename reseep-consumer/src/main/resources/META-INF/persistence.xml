@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<persistence xmlns="https://jakarta.ee/xml/ns/persistence"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="https://jakarta.ee/xml/ns/persistence https://jakarta.ee/xml/ns/persistence/persistence_3_0.xsd"
+             version="3.0">
+
+    <persistence-unit name="reseepPU" transaction-type="JTA">
+        <!--
+          Change this to the JNDI name of the JDBC Resource you created in
+          Payara (Resources > JDBC > JDBC Resources), which in turn points
+          at the Connection Pool for the AWS MySQL database, e.g.
+          databaseName "comp713_w3". See db/schema.sql for the tables this
+          persistence unit expects.
+        -->
+        <jta-data-source>jdbc/ReSeePPool</jta-data-source>
+
+        <properties>
+            <!-- We manage the schema ourselves via db/schema.sql, so EclipseLink
+                 should not try to create or alter tables on startup. -->
+            <property name="eclipselink.ddl-generation" value="none"/>
+            <property name="eclipselink.logging.level" value="INFO"/>
+        </properties>
+    </persistence-unit>
+</persistence>

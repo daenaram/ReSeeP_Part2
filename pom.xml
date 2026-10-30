@@ -29,6 +29,16 @@
             <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- RabbitMQ client, used by EventPublisher to publish ItemPurchased
+             events. Default (compile) scope, so Maven bundles it into
+             WEB-INF/lib automatically; unlike the MySQL driver, nothing needs
+             to be dropped into Payara's own lib folder for this one. -->
+        <dependency>
+            <groupId>com.rabbitmq</groupId>
+            <artifactId>amqp-client</artifactId>
+            <version>5.21.0</version>
+        </dependency>
     </dependencies>
 
     <build>
