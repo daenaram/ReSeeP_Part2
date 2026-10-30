@@ -1,9 +1,4 @@
-package com.mycompany.reseep.consumer;
-
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.ConnectionFactory;
-import com.rabbitmq.client.DeliverCallback;
-import org.json.JSONObject;
+package com.mycompany.reseep;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -19,6 +14,12 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.json.JSONObject;
+
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DeliverCallback;
 
 /**
  * Standalone consumer for the ItemPurchased event published by the web app.
@@ -104,7 +105,15 @@ public class PurchaseConsumer {
                 long boughtByUserId = event.getLong("boughtByUserId");
                 LocalDateTime boughtAt = LocalDateTime.parse(event.getString("boughtAt"));
 
-                addToPantry(db, ingredientId, qty);
+                if (!addToPantry(db, ingredientId, qty)) {
+                    // The ingredient was removed from the pantry after this was
+                    // bought. Retrying can never succeed, so record it as done
+                    // instead of nacking it back onto the queue forever.
+                    System.out.println("[Consumer] Ingredient " + ingredientId + " no longer exists -- skipping event " + eventId + ".");
+                    markProcessed(db, eventId);
+                    db.commit();
+                    return;
+                }
                 insertPurchaseLog(db, shoppingItemId, ingredientId, qty, boughtByUserId, boughtAt, eventId);
                 markProcessed(db, eventId);
 
@@ -128,12 +137,13 @@ public class PurchaseConsumer {
         }
     }
 
-    private static void addToPantry(Connection db, long ingredientId, double qty) throws SQLException {
+    /** Returns false if the ingredient no longer exists. */
+    private static boolean addToPantry(Connection db, long ingredientId, double qty) throws SQLException {
         try (PreparedStatement ps = db.prepareStatement(
                 "UPDATE ingredient SET qty_on_hand = qty_on_hand + ? WHERE id = ?")) {
             ps.setDouble(1, qty);
             ps.setLong(2, ingredientId);
-            ps.executeUpdate();
+            return ps.executeUpdate() > 0;
         }
     }
 

@@ -580,6 +580,13 @@
   <section class="view" id="view-pantry" hidden>
     <div class="list-toolbar">
       <h2>Pantry</h2>
+      <!-- style="display:none" rather than hidden: the inline display:flex would override hidden -->
+      <div id="pantryBulkBar" style="display:none; gap:10px; align-items:center;">
+        <label style="display:flex; gap:6px; align-items:center;">
+          <input type="checkbox" id="pantrySelectAll" /> Select all
+        </label>
+        <button class="btn btn-danger btn-small" id="btnRemoveSelected" disabled>Remove selected</button>
+      </div>
     </div>
     <div class="card" id="pantryCard" style="padding-left:22px;">
       <div id="pantryRows"></div>
@@ -733,6 +740,16 @@ function createPantryItemApi(item) {
   return apiRequest("/pantry", { method: "POST", body: JSON.stringify(item) }); // server-assigned id + saved fields
 }
 
+// Both return 204 (null). 409 if an ingredient is still used by a recipe,
+// the shopping list or the purchase history -- nothing is removed then.
+function deletePantryItemApi(id) {
+  return apiRequest(`/pantry/${id}`, { method: "DELETE" });
+}
+
+function deletePantryItemsApi(ids) {
+  return apiRequest("/pantry/batch-delete", { method: "POST", body: JSON.stringify({ ids }) });
+}
+
 // ---- Shopping list API -----------------------------------------------------
 //   GET  {API_BASE}/shopping              -> [ShoppingItemDto]
 //   POST {API_BASE}/shopping/{id}/bought  -> ShoppingItemDto (409 if already bought)
@@ -777,6 +794,7 @@ async function markBoughtApi(id) {
 // ---- App state ------------------------------------------------------------
 let recipes = [];
 let ingredients = [];
+const selectedPantryIds = new Set(); // ticked pantry rows; survives the WebSocket re-renders
 let shoppingItems = [];
 let currentRecipe = null; // recipe object being edited, or null
 
@@ -1377,6 +1395,12 @@ function renderPantry() {
   const container = el("pantryRows");
   container.innerHTML = "";
 
+  const canRemove = currentUser && currentUser.role === "COOK";
+  for (const id of [...selectedPantryIds]) {
+    if (!findIngredient(id)) selectedPantryIds.delete(id); // removed elsewhere
+  }
+  updatePantryBulkBar();
+
   if (!hasLoadedOnce) {
     container.innerHTML = `<p class="recipe-meta" style="padding:6px 0;">The pantry hasn't loaded — the server couldn't be reached.</p>`;
     return;
@@ -1390,9 +1414,11 @@ function renderPantry() {
     const row = document.createElement("div");
     row.className = "pantry-row";
     row.innerHTML = `
+      ${canRemove ? `<input type="checkbox" class="pantryPick" data-id="${ing.id}" ${selectedPantryIds.has(ing.id) ? "checked" : ""} aria-label="Select ${escapeHtml(ing.name)}" />` : ""}
       <span class="pantry-name">${escapeHtml(ing.name)}<small>${escapeHtml(ing.unit)}</small></span>
       <span class="pantry-qty">
         <input type="number" min="0" step="0.5" value="${ing.qtyOnHand}" data-id="${ing.id}" class="pantryQtyInput" />
+        ${canRemove ? `<button class="btn btn-danger btn-small pantryRemove" data-id="${ing.id}">Remove</button>` : ""}
       </span>
     `;
     container.appendChild(row);
@@ -1421,7 +1447,55 @@ function renderPantry() {
       renderRecipeList(); // missing-ingredient badges may have changed
     });
   });
+
+  container.querySelectorAll(".pantryPick").forEach((box) => {
+    box.addEventListener("change", (e) => {
+      const id = normalizeId(e.target.dataset.id);
+      if (e.target.checked) selectedPantryIds.add(id); else selectedPantryIds.delete(id);
+      updatePantryBulkBar();
+    });
+  });
+  container.querySelectorAll(".pantryRemove").forEach((btn) => {
+    btn.addEventListener("click", () => removePantryItems([normalizeId(btn.dataset.id)]));
+  });
 }
+
+// Only the Cook can remove ingredients; the Shopper just sees quantities.
+function updatePantryBulkBar() {
+  const canRemove = currentUser && currentUser.role === "COOK";
+  el("pantryBulkBar").style.display = canRemove && ingredients.length ? "flex" : "none";
+  const n = selectedPantryIds.size;
+  el("btnRemoveSelected").disabled = n === 0;
+  el("btnRemoveSelected").textContent = n ? `Remove selected (${n})` : "Remove selected";
+  el("pantrySelectAll").checked = ingredients.length > 0 && n === ingredients.length;
+}
+
+async function removePantryItems(ids) {
+  const names = ids.map((id) => findIngredient(id)?.name).filter(Boolean);
+  const label = names.length === 1 ? names[0] : `${names.length} ingredients`;
+  if (!confirm(`Remove ${label} from the pantry?`)) return;
+  try {
+    if (ids.length === 1) await deletePantryItemApi(ids[0]);
+    else await deletePantryItemsApi(ids);
+  } catch (err) {
+    showToast("Couldn't remove: " + errorMessage(err)); // a 409 names what's still in use
+    return;
+  }
+  ids.forEach((id) => selectedPantryIds.delete(id));
+  ingredients = ingredients.filter((ing) => !ids.includes(ing.id));
+  shoppingItems = shoppingItems.filter((it) => !ids.includes(it.ingredientId)); // its bought history went too
+  renderPantry();
+  renderShopping();
+  renderRecipeList(); // missing-ingredient badges
+  showToast(ids.length === 1 ? "Removed from pantry" : `${ids.length} ingredients removed`);
+}
+
+el("btnRemoveSelected").addEventListener("click", () => removePantryItems([...selectedPantryIds]));
+el("pantrySelectAll").addEventListener("change", (e) => {
+  selectedPantryIds.clear();
+  if (e.target.checked) ingredients.forEach((ing) => selectedPantryIds.add(ing.id));
+  renderPantry();
+});
 
 el("btnAddPantryItem").addEventListener("click", async () => {
   const nameInput = el("newIngredientName");
