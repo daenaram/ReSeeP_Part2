@@ -79,8 +79,12 @@
     display:flex;
     gap:2px;
     margin-bottom:0;
-    border-bottom:1px solid var(--line);
+    /* The grey rule is an inset shadow, not a border, so the active tab's
+       underline can sit on top of it without being nudged outside the box —
+       which made the browser add a scrollbar. */
+    box-shadow:inset 0 -1px 0 var(--line);
     overflow-x:auto;
+    overflow-y:hidden;
   }
   .tab-btn{
     background:none;
@@ -92,8 +96,6 @@
     font-size:15px;
     font-weight:500;
     color:var(--ink-soft);
-    position:relative;
-    top:1px;
     text-decoration:none;
     white-space:nowrap;
   }
@@ -1760,11 +1762,16 @@ function renderPantryKeepingFocus() {
 // ---- Boot ------------------------------------------------------------------
 function updateApiStatus() {
   el("apiDot").classList.toggle("live", serverReachable);
+  el("apiDot").classList.toggle("offline", !serverReachable);
   el("apiStatusText").textContent = serverReachable
     ? `Connected to ${API_BASE}`
     : `Can't reach ${API_BASE}`;
-  el("serverNotice").hidden = !loadError;
-  el("serverNoticeText").textContent = loadError;
+  // Also show the banner (with Try again) when a single request finds the
+  // API gone, not just when a full reload fails.
+  const message = loadError || (serverReachable ? "" :
+    "Lost contact with the server — changes can't be saved right now. This page reloads by itself when it's back.");
+  el("serverNotice").hidden = !message;
+  el("serverNoticeText").textContent = message;
 }
 
 // Shown in place of a view's contents until the first load succeeds, so an
