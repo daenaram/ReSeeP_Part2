@@ -59,10 +59,12 @@ In `index.html`, set:
 const API_BASE = "http://localhost:8080/reseep/api";
 ```
 
-Reload the page — the status line under the tabs should switch from
-"showing sample data" to "Connected to …", and the same sample recipes and
-pantry items the frontend uses offline should now be coming from the
-database instead.
+Reload the page — the status line under the tabs should say
+"Connected to …". All data comes from the server; there is no offline
+sample mode. If the server can't be reached, the page shows a red banner
+with **Try again**, refuses changes (each failed save says why and leaves the
+screen as it was), and reloads by itself once the live-update socket
+reconnects.
 
 ## Resetting the data
 
@@ -102,8 +104,7 @@ returns `404 Not Found`.
 | `shopper` | `shopper123` | Shopper | Shopping list, Pantry                     |
 
 The web client signs in with `POST /api/login` (`{ username, password }` →
-`{ id, username, role }`). Until that endpoint exists, the page falls back to
-the accounts above and says so in the sign-in toast. The signed-in user is
+`{ id, username, role }`). The signed-in user is
 kept in `sessionStorage`, so it lasts until the tab is closed. Hiding views
 by role is only a convenience in the UI; the API is responsible for
 enforcing roles.

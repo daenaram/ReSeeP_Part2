@@ -468,6 +468,11 @@
 
   <p class="status-line" id="apiStatus"><span class="status-dot" id="apiDot"></span><span id="apiStatusText">Checking for a server…</span><span class="status-sep">|</span><span class="status-dot" id="liveDot"></span><span id="liveStatusText" aria-live="polite">Live updates connecting…</span></p>
 
+  <div class="notice error" id="serverNotice" role="alert" style="margin-top:10px;" hidden>
+    <span id="serverNoticeText"></span>
+    <button class="btn btn-secondary btn-small" id="btnRetryLoad">Try again</button>
+  </div>
+
   <!-- SIGN IN -->
   <section class="view" id="view-login" hidden>
     <div class="card login-card">
@@ -593,10 +598,6 @@
       <h2>Shopping list</h2>
       <span class="recipe-meta" id="shoppingSummary"></span>
     </div>
-    <div class="notice" id="shoppingNotice" role="status" hidden>
-      <span id="shoppingNoticeText"></span>
-      <button class="btn btn-secondary btn-small" id="btnRetryShopping" hidden>Try again</button>
-    </div>
     <div id="shoppingList">
       <div class="card empty-state">Loading the shopping list…</div>
     </div>
@@ -610,181 +611,122 @@
 /* =========================================================================
    ReSeeP frontend client
    -------------------------------------------------------------------------
-   This page is written to talk to a JAX-RS backend on Payara through the
-   endpoints below. Point API_BASE at your deployed service, e.g.
-   "http://localhost:8080/reseep/api". Until that backend exists (or if a
-   request fails), the app falls back to the in-memory MOCK data so the UI
-   is fully clickable on its own.
+   This page talks to the JAX-RS backend on Payara; all data comes from and
+   goes to the server — there is no offline/sample mode. If the server can't
+   be reached, the page says so, changes are not applied, and it reloads
+   automatically when the live-update socket reconnects.
 
-   REST resources (Option A: JAX-RS on Payara, MySQL via JPA):
-     GET    {API_BASE}/recipes            -> list of recipes (with items[])
-     GET    {API_BASE}/recipes/{id}       -> one recipe
-     POST   {API_BASE}/recipes            -> create a recipe
-     PUT    {API_BASE}/recipes/{id}       -> update a recipe (replaces items)
-     DELETE {API_BASE}/recipes/{id}       -> delete a recipe
-     GET    {API_BASE}/pantry             -> list of ingredients + qty on hand
-     POST   {API_BASE}/pantry             -> add a new pantry ingredient
-     PUT    {API_BASE}/pantry/{id}        -> update quantity on hand
+   REST resources (JAX-RS on Payara, MySQL via JPA):
+     POST   {API_BASE}/login                  -> sign in, returns { id, username, role }
+     GET    {API_BASE}/recipes                -> list of recipes (with items[])
+     POST   {API_BASE}/recipes                -> create a recipe
+     PUT    {API_BASE}/recipes/{id}           -> update a recipe (replaces items)
+     DELETE {API_BASE}/recipes/{id}           -> delete a recipe
+     POST   {API_BASE}/recipes/{id}/plan      -> add the recipe's shortfall to the shopping list
+     GET    {API_BASE}/pantry                 -> list of ingredients + qty on hand
+     POST   {API_BASE}/pantry                 -> add a new pantry ingredient
+     PUT    {API_BASE}/pantry/{id}            -> update quantity on hand
+     GET    {API_BASE}/shopping               -> shopping list
+     POST   {API_BASE}/shopping/{id}/bought   -> mark an item bought
 
-   Data shapes (match RecipeDto / IngredientDto on the backend):
+   Data shapes (match the backend DTOs):
      Recipe   { id, name, servings, notes, items: [{ ingredientId, qty }] }
      Pantry   { id, name, unit, qtyOnHand }
    ========================================================================= */
 
 const API_BASE = "http://localhost:8080/reseep/api"; // Payara base URL
 
-let usingLiveApi = false;
+let serverReachable = false; // did the last request get any answer from the server?
+let hasLoadedOnce = false;   // have recipes/pantry/shopping loaded at least once?
+let loadError = "";          // shown in the banner while the last full load failed
 
-// ---- Mock data (used until the real API is reachable) -------------------
-let mockIngredients = [
-  { id: "ing1", name: "Spaghetti",      unit: "g",   qtyOnHand: 400 },
-  { id: "ing2", name: "Tomato",         unit: "pc",  qtyOnHand: 2 },
-  { id: "ing3", name: "Basil",          unit: "g",   qtyOnHand: 0 },
-  { id: "ing4", name: "Garlic",         unit: "clove", qtyOnHand: 6 },
-  { id: "ing5", name: "Rice",           unit: "g",   qtyOnHand: 500 },
-  { id: "ing6", name: "Egg",            unit: "pc",  qtyOnHand: 3 },
-  { id: "ing7", name: "Soy sauce",      unit: "tbsp", qtyOnHand: 0 },
-  { id: "ing8", name: "Ground beef",    unit: "g",   qtyOnHand: 0 },
-  { id: "ing9", name: "Kidney beans",   unit: "can", qtyOnHand: 2 },
-  { id: "ing10", name: "Chili powder",  unit: "tsp", qtyOnHand: 4 }
-];
-
-let mockRecipes = [
-  {
-    id: "r1", name: "Tomato basil pasta", servings: 2, notes: "Quick midweek dinner",
-    items: [
-      { ingredientId: "ing1", qty: 200 },
-      { ingredientId: "ing2", qty: 3 },
-      { ingredientId: "ing3", qty: 10 },
-      { ingredientId: "ing4", qty: 2 }
-    ]
-  },
-  {
-    id: "r2", name: "Pantry fried rice", servings: 3, notes: "Good for leftovers",
-    items: [
-      { ingredientId: "ing5", qty: 300 },
-      { ingredientId: "ing6", qty: 2 },
-      { ingredientId: "ing7", qty: 2 }
-    ]
-  },
-  {
-    id: "r3", name: "Weeknight chili", servings: 4, notes: "",
-    items: [
-      { ingredientId: "ing8", qty: 400 },
-      { ingredientId: "ing9", qty: 2 },
-      { ingredientId: "ing10", qty: 3 }
-    ]
-  }
-];
-
-// ---- Thin API layer: tries the real backend, falls back to mock --------
+// ---- Thin API layer --------------------------------------------------------
+// Throws on failure. err.status is set when the server answered with an error
+// (4xx/5xx); it's absent when the server couldn't be reached at all.
 async function apiRequest(path, options = {}) {
-  const res = await fetch(API_BASE + path, {
-    headers: { "Content-Type": "application/json" },
-    ...options
-  });
-  if (!res.ok) {
-    // Prefer the server's own {"error": "..."} message, and keep the status
-    // so callers can tell "server said no" (4xx) from "server unreachable".
-    let message = "Request failed: " + res.status;
-    try {
-      const body = await res.json();
-      if (body && body.error) message = body.error;
-    } catch (e) { /* not JSON */ }
-    const err = new Error(message);
-    err.status = res.status;
+  let res;
+  try {
+    res = await fetch(API_BASE + path, {
+      headers: { "Content-Type": "application/json" },
+      ...options
+    });
+  } catch (e) {
+    setServerReachable(false);
+    throw e;
+  }
+
+  if (res.ok) {
+    setServerReachable(true);
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  // The ReSeeP API always explains its own errors as {"error": "..."}.
+  let apiMessage = null;
+  try {
+    const body = await res.json();
+    if (body && body.error) apiMessage = body.error;
+  } catch (e) { /* not JSON: an HTML page from Payara itself */ }
+
+  if (apiMessage !== null || res.status >= 500) {
+    // The API answered (a validation/not-found/conflict error, or it crashed).
+    setServerReachable(true);
+    const err = new Error(apiMessage ?? `the server hit an internal error (HTTP ${res.status})`);
+    err.status = res.status; // callers can react to e.g. 401 or 409
     throw err;
   }
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
+
+  // No {"error"} body and not a crash: Payara answered for an app that isn't
+  // running (disabled or undeployed gives 403/404). Treat it like being down.
+  setServerReachable(false);
+  const err = new Error(`the ReSeeP API isn't available (HTTP ${res.status}) — is the app deployed and enabled in Payara?`);
+  err.unavailable = true;
+  throw err;
 }
 
-async function loadRecipes() {
-  try {
-    const data = await apiRequest("/recipes");
-    usingLiveApi = true;
-    return data;
-  } catch (e) {
-    usingLiveApi = false;
-    return mockRecipes;
-  }
+function setServerReachable(reachable) {
+  if (serverReachable === reachable) return;
+  serverReachable = reachable;
+  updateApiStatus();
 }
 
-async function loadPantry() {
-  try {
-    const data = await apiRequest("/pantry");
-    usingLiveApi = true;
-    return data;
-  } catch (e) {
-    usingLiveApi = false;
-    return mockIngredients;
-  }
+// A user-facing explanation of a failed request.
+function errorMessage(e) {
+  if (e.status || e.unavailable) return e.message;
+  return "couldn't reach the server — check it's running and try again";
 }
 
-async function saveRecipeApi(recipe) {
-  try {
-    if (recipe.id && !recipe.id.toString().startsWith("new-")) {
-      return await apiRequest(`/recipes/${recipe.id}`, { method: "PUT", body: JSON.stringify(recipe) });
-    } else {
-      // recipe.id is a temporary client-side placeholder like "new-172..."
-      // at this point — the backend assigns the real numeric id, so leave
-      // it out of the payload entirely rather than sending a non-numeric
-      // string into a Long field.
-      const { id, ...payload } = recipe;
-      return await apiRequest("/recipes", { method: "POST", body: JSON.stringify(payload) });
-    }
-  } catch (e) {
-    return null; // falls back to local mutation of mock data
+function saveRecipeApi(recipe) {
+  if (recipe.id && !recipe.id.toString().startsWith("new-")) {
+    return apiRequest(`/recipes/${recipe.id}`, { method: "PUT", body: JSON.stringify(recipe) });
   }
+  // recipe.id is a temporary client-side placeholder like "new-172..." at
+  // this point — the backend assigns the real numeric id, so leave it out of
+  // the payload rather than sending a non-numeric string into a Long field.
+  const { id, ...payload } = recipe;
+  return apiRequest("/recipes", { method: "POST", body: JSON.stringify(payload) });
 }
 
-async function deleteRecipeApi(id) {
-  try {
-    await apiRequest(`/recipes/${id}`, { method: "DELETE" });
-    return true;
-  } catch (e) {
-    return false;
-  }
+function deleteRecipeApi(id) {
+  return apiRequest(`/recipes/${id}`, { method: "DELETE" });
 }
 
-async function savePantryItemApi(item) {
-  try {
-    await apiRequest(`/pantry/${item.id}`, { method: "PUT", body: JSON.stringify(item) });
-    return true;
-  } catch (e) {
-    return false;
-  }
+function savePantryItemApi(item) {
+  return apiRequest(`/pantry/${item.id}`, { method: "PUT", body: JSON.stringify(item) });
 }
 
-async function createPantryItemApi(item) {
-  try {
-    const created = await apiRequest("/pantry", { method: "POST", body: JSON.stringify(item) });
-    return created; // server-assigned id + the saved fields
-  } catch (e) {
-    return null; // caller falls back to a local-only id
-  }
+function createPantryItemApi(item) {
+  return apiRequest("/pantry", { method: "POST", body: JSON.stringify(item) }); // server-assigned id + saved fields
 }
 
 // ---- Shopping list API -----------------------------------------------------
-//   GET  {API_BASE}/shopping              -> [ShoppingItem]
-//   POST {API_BASE}/shopping/{id}/bought  -> ShoppingItem (409 if already bought)
-//   ShoppingItem { id, ingredientId, name, unit, qty, status: "NEEDED"|"BOUGHT",
-//                  addedBy, addedAt, boughtBy, boughtAt }
-// Until the backend has these (404) or if it's unreachable, a sample list is
-// used and changes only live in this tab.
-const minutesAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
-let mockShopping = [
-  { id: "s1", ingredientId: "ing3", name: "Basil",  unit: "g",  qty: 20, status: "NEEDED", addedBy: "cook", addedAt: minutesAgo(40), boughtBy: null, boughtAt: null },
-  { id: "s2", ingredientId: "ing2", name: "Tomato", unit: "pc", qty: 2,  status: "NEEDED", addedBy: "cook", addedAt: minutesAgo(40), boughtBy: null, boughtAt: null },
-  { id: "s3", ingredientId: "ing5", name: "Rice",   unit: "g",  qty: 500, status: "BOUGHT", addedBy: "cook", addedAt: minutesAgo(180), boughtBy: "shopper", boughtAt: minutesAgo(95) },
-];
+//   GET  {API_BASE}/shopping              -> [ShoppingItemDto]
+//   POST {API_BASE}/shopping/{id}/bought  -> ShoppingItemDto (409 if already bought)
+//   ShoppingItemDto { id, ingredientId, ingredientName, unit, qty,
+//                     status: "NEEDED"|"BOUGHT", addedByUsername,
+//                     boughtByUsername, boughtAt }
 
-// "live" = from the server, "sample" = mock fallback, "error" = server failed
-let shoppingSource = "sample";
-let shoppingError = "";
-
-// The server's ShoppingItemDto names some fields differently from the sample
-// list; map them onto the names this page uses.
+// Map the server's field names onto the shorter ones this page uses.
 function normalizeShoppingItem(it) {
   return {
     ...it,
@@ -795,23 +737,22 @@ function normalizeShoppingItem(it) {
 }
 
 async function loadShopping() {
-  try {
-    const data = await apiRequest("/shopping");
-    shoppingSource = "live";
-    return (data || []).map(normalizeShoppingItem);
-  } catch (e) {
-    if (e.status && e.status !== 404) {
-      shoppingSource = "error"; // server is there but failed: keep what we had
-      shoppingError = e.message;
-      return shoppingItems.length ? shoppingItems : [];
-    }
-    shoppingSource = "sample";
-    return mockShopping;
-  }
+  const data = await apiRequest("/shopping");
+  return (data || []).map(normalizeShoppingItem);
+}
+
+// Everything the views need, in one go. Throws if any part fails, leaving the
+// previous data in place.
+async function loadAll() {
+  const [r, p, s] = await Promise.all([apiRequest("/recipes"), apiRequest("/pantry"), loadShopping()]);
+  recipes = r || [];
+  ingredients = p || [];
+  shoppingItems = s;
+  hasLoadedOnce = true;
+  loadError = "";
 }
 
 async function markBoughtApi(id) {
-  if (shoppingSource !== "live") return null; // caller updates the sample list locally
   const updated = await apiRequest(`/shopping/${id}/bought`, {
     method: "POST",
     body: JSON.stringify({ userId: currentUser.id }), // the server records who bought it
@@ -841,16 +782,10 @@ function showToast(msg) {
 
 // ---- Sign-in and roles -----------------------------------------------------
 //   POST {API_BASE}/login  { username, password }  ->  { id, username, role }
-// role is "COOK" or "SHOPPER". Until the backend has /login (404) or if the
-// server is unreachable, the test accounts below are used instead so the web
-// client can be built and demoed. A 400/401 from a real server is final.
+// role is "COOK" or "SHOPPER"; a wrong username/password is a 401.
 //
 // Hiding views by role is a convenience for the user, not security: the API
 // must check the role itself before allowing a write.
-const MOCK_USERS = [
-  { id: 1, username: "cook", password: "cook123", role: "COOK" },
-  { id: 2, username: "shopper", password: "shopper123", role: "SHOPPER" },
-];
 const ROLE_VIEWS = {
   COOK: ["recipes", "pantry", "plan", "shopping"],
   SHOPPER: ["shopping", "pantry"],
@@ -877,20 +812,8 @@ function saveSessionUser(user) {
   } catch (e) { /* storage blocked: stays signed in until reload */ }
 }
 
-async function loginApi(username, password) {
-  try {
-    return await apiRequest("/login", { method: "POST", body: JSON.stringify({ username, password }) });
-  } catch (e) {
-    if (e.status && e.status !== 404) throw e;
-    const match = MOCK_USERS.find((u) => u.username === username && u.password === password);
-    if (!match) {
-      const err = new Error("Invalid username or password.");
-      err.status = 401;
-      throw err;
-    }
-    const { password: _ignored, ...user } = match;
-    return { ...user, mock: true };
-  }
+function loginApi(username, password) {
+  return apiRequest("/login", { method: "POST", body: JSON.stringify({ username, password }) });
 }
 
 function canView(view) {
@@ -938,13 +861,13 @@ el("loginForm").addEventListener("submit", async (e) => {
     el("loginForm").reset();
     showLoginError(null);
     updateUserBar();
-    showToast(`Signed in as ${user.username}` + (user.mock ? " (test account — no login server yet)" : ""));
+    showToast(`Signed in as ${user.username}`);
 
     const target = pendingRoute && canView(routeView(pendingRoute)) ? pendingRoute : defaultRoute();
     pendingRoute = null;
     navigate(target);
   } catch (err) {
-    showLoginError(err.status ? err.message : "Couldn't reach the server: " + err.message);
+    showLoginError(err.status ? err.message : "Couldn't sign in: " + errorMessage(err) + ".");
   } finally {
     el("btnSignIn").disabled = false;
   }
@@ -1022,6 +945,13 @@ function router() {
 
   if (view === "recipes" && param) {
     const found = param === "new" ? openNewRecipe() : openRecipeDetail(normalizeId(param));
+    if (!found && !hasLoadedOnce) {
+      // Nothing loaded yet, so we can't tell; keep the URL and show the list
+      // (with its "hasn't loaded" message). refreshFromServer re-routes later.
+      setActiveTab("recipes");
+      showView("recipes");
+      return;
+    }
     if (!found) {
       showToast("That recipe doesn't exist");
       navigate("#/recipes");
@@ -1058,6 +988,10 @@ function renderRecipeList() {
   const container = el("recipeList");
   container.innerHTML = "";
 
+  if (!hasLoadedOnce) {
+    container.innerHTML = notLoadedHtml("Your recipe list");
+    return;
+  }
   if (recipes.length === 0) {
     container.innerHTML = `
       <div class="card empty-state">
@@ -1189,8 +1123,8 @@ el("btnAddIngredient").addEventListener("click", () => {
   renderMissingPanel();
 });
 
-// An id from the backend is a number (Long); an id made up locally before a
-// server exists is a string like "ing1". Keep whichever form it already is.
+// Ids from the backend are numbers (Long), but dataset/hash values are always
+// strings; anything non-numeric (e.g. a "new-…" placeholder) stays a string.
 function normalizeId(id) {
   return /^\d+$/.test(id) ? Number(id) : id;
 }
@@ -1237,8 +1171,13 @@ el("btnConfirmNewIngredient").addEventListener("click", async () => {
     qtyOnHand: 0 // it's new, so assume none on hand yet — edit it from the Pantry tab once you actually have some
   };
 
-  const created = await createPantryItemApi(newPantryItem);
-  const ingredient = created || { id: "ing" + Date.now(), ...newPantryItem };
+  let ingredient;
+  try {
+    ingredient = await createPantryItemApi(newPantryItem);
+  } catch (e) {
+    showToast("Couldn't add the ingredient: " + errorMessage(e));
+    return; // keep the form filled in so they can try again
+  }
   ingredients.push(ingredient);
 
   currentRecipe.items.push({ ingredientId: normalizeId(ingredient.id), qty: recipeQty });
@@ -1247,7 +1186,7 @@ el("btnConfirmNewIngredient").addEventListener("click", async () => {
   renderIngredientRows();
   renderAddIngredientSelect();
   renderMissingPanel();
-  showToast(created ? "Ingredient added to pantry and recipe" : "Added locally (no server connected)");
+  showToast("Ingredient added to pantry and recipe");
 });
 
 function renderMissingPanel() {
@@ -1296,32 +1235,39 @@ el("btnSaveRecipe").addEventListener("click", async () => {
   currentRecipe.servings = Math.max(1, Number(el("fRecipeServings").value) || 1);
   currentRecipe.notes = el("fRecipeNotes").value.trim();
 
-  const isNew = currentRecipe.id.toString().startsWith("new-");
-  const saved = await saveRecipeApi(currentRecipe);
-
-  if (saved) {
-    currentRecipe.id = saved.id; // adopt the real database id (critical for a brand-new recipe)
-  } else if (isNew) {
-    currentRecipe.id = "r" + Date.now(); // local-only placeholder, no server reachable
+  let saved;
+  el("btnSaveRecipe").disabled = true;
+  try {
+    saved = await saveRecipeApi(currentRecipe);
+  } catch (e) {
+    // Stay in the editor with their changes so they can fix it or retry.
+    showToast("Couldn't save the recipe: " + errorMessage(e));
+    return;
+  } finally {
+    el("btnSaveRecipe").disabled = false;
   }
 
-  if (isNew) {
-    recipes.push(currentRecipe);
-  } else {
-    const i = recipes.findIndex((r) => r.id === currentRecipe.id);
-    recipes[i] = currentRecipe;
-  }
+  // Use what the server stored (it assigns the id for a new recipe).
+  const i = recipes.findIndex((r) => r.id === saved.id);
+  if (i === -1) recipes.push(saved);
+  else recipes[i] = saved;
 
-  showToast(saved ? "Recipe saved" : "Recipe saved locally (no server connected)");
+  showToast("Recipe saved");
   renderRecipeList();
   backToRecipes();
 });
 
 el("btnDeleteRecipe").addEventListener("click", async () => {
   if (!confirm(`Delete "${currentRecipe.name}"? This can't be undone.`)) return;
-  const deletedOnServer = await deleteRecipeApi(currentRecipe.id);
-  recipes = recipes.filter((r) => r.id !== currentRecipe.id);
-  showToast(deletedOnServer ? "Recipe deleted" : "Recipe deleted locally (no server connected)");
+  const id = currentRecipe.id;
+  try {
+    await deleteRecipeApi(id);
+  } catch (e) {
+    showToast("Couldn't delete the recipe: " + errorMessage(e));
+    return;
+  }
+  recipes = recipes.filter((r) => r.id !== id);
+  showToast("Recipe deleted");
   renderRecipeList();
   backToRecipes();
 });
@@ -1331,6 +1277,10 @@ function renderPantry() {
   const container = el("pantryRows");
   container.innerHTML = "";
 
+  if (!hasLoadedOnce) {
+    container.innerHTML = `<p class="recipe-meta" style="padding:6px 0;">The pantry hasn't loaded — the server couldn't be reached.</p>`;
+    return;
+  }
   if (ingredients.length === 0) {
     container.innerHTML = `<p class="recipe-meta" style="padding:6px 0;">Your pantry is empty.</p>`;
     return;
@@ -1353,9 +1303,16 @@ function renderPantry() {
       const id = normalizeId(e.target.dataset.id); // dataset values are always strings; ingredient ids from the backend are numbers
       const ing = findIngredient(id);
       if (!ing) return; // shouldn't happen, but avoid crashing on a stale row
-      ing.qtyOnHand = Number(e.target.value) || 0;
-      const savedOnServer = await savePantryItemApi(ing);
-      showToast(savedOnServer ? "Pantry updated" : "Updated locally (no server connected)");
+      const qtyOnHand = Number(e.target.value) || 0;
+      try {
+        const saved = await savePantryItemApi({ ...ing, qtyOnHand });
+        Object.assign(ing, saved || { qtyOnHand });
+      } catch (err) {
+        e.target.value = ing.qtyOnHand; // put back the value the server still has
+        showToast("Couldn't update the pantry: " + errorMessage(err));
+        return;
+      }
+      showToast("Pantry updated");
       renderRecipeList(); // missing-ingredient badges may have changed
     });
   });
@@ -1378,22 +1335,28 @@ el("btnAddPantryItem").addEventListener("click", async () => {
     qtyOnHand: Number(qtyInput.value) || 0
   };
 
-  const created = await createPantryItemApi(newItem);
-  ingredients.push(created || { id: "ing" + Date.now(), ...newItem });
+  let created;
+  try {
+    created = await createPantryItemApi(newItem);
+  } catch (e) {
+    showToast("Couldn't add to the pantry: " + errorMessage(e));
+    return; // keep what they typed
+  }
+  ingredients.push(created);
 
   nameInput.value = "";
   unitInput.value = "";
   qtyInput.value = "";
   renderPantry();
-  showToast(created ? "Added to pantry" : "Added locally (no server connected)");
+  showToast("Added to pantry");
 });
 
 // ---- Meal plan: "Plan this recipe" -----------------------------------------
 //   POST {API_BASE}/recipes/{id}/plan  ->  [ShoppingItem]  (the items it added)
 // The server compares the recipe with the pantry and adds each shortfall to
-// the shopping list, less whatever is already on the list as NEEDED, so
-// planning twice doesn't double up. An empty array means nothing was missing.
-// While the shopping list is the sample one, the same rule runs locally.
+// the shopping list. An empty array means nothing was missing. The "would
+// add" preview below assumes the server subtracts what's already on the list
+// as NEEDED, so planning twice doesn't double up.
 
 // What planning this recipe would add, given the pantry and current list.
 function planShortfall(recipe) {
@@ -1411,21 +1374,14 @@ function planShortfall(recipe) {
 }
 
 async function planRecipeApi(recipe) {
-  if (shoppingSource !== "live") {
-    const now = new Date().toISOString();
-    const added = planShortfall(recipe).map((s, i) => ({
-      id: `s${Date.now()}${i}`, ...s, status: "NEEDED",
-      addedBy: currentUser.username, addedAt: now, boughtBy: null, boughtAt: null,
-    }));
-    shoppingItems.push(...added);
-    return { added, sample: true };
-  }
   const added = await apiRequest(`/recipes/${recipe.id}/plan`, {
     method: "POST",
     body: JSON.stringify({ userId: currentUser.id }), // the server records who added it
   });
-  shoppingItems = await loadShopping(); // pick up the server's view of the list
-  return { added: (added || []).map(normalizeShoppingItem), sample: false };
+  try {
+    shoppingItems = await loadShopping(); // pick up the server's view of the list
+  } catch (e) { /* the plan succeeded; the live update will refresh the list */ }
+  return (added || []).map(normalizeShoppingItem);
 }
 
 async function planRecipe(recipeId, btn) {
@@ -1433,21 +1389,19 @@ async function planRecipe(recipeId, btn) {
   if (!recipe) return;
   if (btn) btn.disabled = true;
 
-  let result;
+  let added;
   try {
-    result = await planRecipeApi(recipe);
+    added = await planRecipeApi(recipe);
   } catch (e) {
-    showToast(e.status ? e.message : "Couldn't reach the server — try again");
+    showToast("Couldn't plan the recipe: " + errorMessage(e));
     if (btn) btn.disabled = false;
     return;
   }
 
-  const { added, sample } = result;
   const message = added.length === 0
     ? `Nothing to buy for ${recipe.name} — you have everything, or it's already on the list.`
     : `Added ${added.length} item${added.length === 1 ? "" : "s"} for ${recipe.name}: ` +
-      added.map((a) => `${a.name} ${a.qty} ${a.unit}`).join(", ") +
-      (sample ? " (sample list, not saved)" : "");
+      added.map((a) => `${a.name} ${a.qty} ${a.unit}`).join(", ");
 
   showToast(added.length ? `Added ${added.length} item${added.length === 1 ? "" : "s"} to the shopping list` : "Nothing to add");
   renderShopping();
@@ -1470,6 +1424,10 @@ function renderPlan(result) {
 
   const container = el("planList");
   container.innerHTML = "";
+  if (!hasLoadedOnce) {
+    container.innerHTML = notLoadedHtml("The meal plan");
+    return;
+  }
   if (recipes.length === 0) {
     container.innerHTML = `
       <div class="card empty-state">
@@ -1516,8 +1474,8 @@ el("btnPlanRecipe").addEventListener("click", () => {
 
 // ---- Shopping list view ----------------------------------------------------
 // The Cook sees what's needed and who bought what; the Shopper can also tick
-// items off. Buying an item adds its qty to the pantry (done by the server;
-// mirrored locally when using the sample list).
+// items off. Buying an item adds its qty to the pantry (done on the server
+// side by the purchase consumer, which then triggers a pantry live update).
 function formatTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -1535,17 +1493,13 @@ function renderShopping() {
     ? `${needed.length} to buy · ${bought.length} bought`
     : "";
 
-  const notice = el("shoppingNotice");
-  notice.hidden = shoppingSource === "live";
-  notice.classList.toggle("error", shoppingSource === "error");
-  el("btnRetryShopping").hidden = shoppingSource !== "error";
-  el("shoppingNoticeText").textContent = shoppingSource === "error"
-    ? `Couldn't load the latest shopping list: ${shoppingError}`
-    : "Showing a sample list — the server has no shopping list yet. Changes stay in this tab.";
-
   const container = el("shoppingList");
   container.innerHTML = "";
 
+  if (!hasLoadedOnce) {
+    container.innerHTML = notLoadedHtml("The shopping list");
+    return;
+  }
   if (items.length === 0) {
     container.innerHTML = `
       <div class="card empty-state">
@@ -1607,25 +1561,14 @@ async function markBought(id, btn) {
   btn.disabled = true; // stop double-clicks sending two requests
 
   try {
-    const updated = await markBoughtApi(id);
-    if (updated) {
-      Object.assign(item, updated);
-      // The server also raised the pantry quantity; fetch it so badges are right.
-      try { ingredients = await apiRequest("/pantry"); } catch (e) { /* the live update will catch up */ }
-      showToast(`${item.name ?? "Item"} marked as bought`);
-    } else {
-      // Sample list: do locally what the server would do.
-      Object.assign(item, { status: "BOUGHT", boughtBy: currentUser.username, boughtAt: new Date().toISOString() });
-      const ing = findIngredient(item.ingredientId);
-      if (ing) ing.qtyOnHand += Number(item.qty) || 0;
-      showToast(`${item.name ?? "Item"} marked as bought (sample list, not saved)`);
-    }
+    Object.assign(item, await markBoughtApi(id));
+    showToast(`${item.name ?? "Item"} marked as bought`);
   } catch (e) {
     if (e.status === 409) {
       showToast("Someone already bought that — list updated");
-      shoppingItems = await loadShopping();
+      try { shoppingItems = await loadShopping(); } catch (e2) { /* live update will catch up */ }
     } else {
-      showToast(e.status ? e.message : "Couldn't reach the server — try again");
+      showToast("Couldn't mark it bought: " + errorMessage(e));
       btn.disabled = false;
       return;
     }
@@ -1635,10 +1578,11 @@ async function markBought(id, btn) {
   renderRecipeList(); // "Ready to cook" may have changed
 }
 
-el("btnRetryShopping").addEventListener("click", async () => {
-  shoppingItems = await loadShopping();
-  renderShopping();
-  if (shoppingSource !== "error") showToast("Shopping list loaded");
+el("btnRetryLoad").addEventListener("click", async () => {
+  el("btnRetryLoad").disabled = true;
+  const ok = await refreshFromServer("Loaded the latest data");
+  el("btnRetryLoad").disabled = false;
+  if (!ok) showToast("Still can't reach the server");
 });
 
 // ---- Live updates (WebSocket) ----------------------------------------------
@@ -1673,8 +1617,8 @@ function connectLiveUpdates() {
     setLiveStatus("live");
     // Anything that changed while we were disconnected was never pushed to
     // us, so reload the full current state. Also covers the case where the
-    // page booted on sample data because the server was down.
-    if (liveConnectedBefore || !usingLiveApi) {
+    // server was down when the page first loaded.
+    if (liveConnectedBefore || !hasLoadedOnce) {
       refreshFromServer("Reconnected — showing latest data");
     }
     liveConnectedBefore = true;
@@ -1744,23 +1688,23 @@ function describeShoppingChanges(before, after) {
   return { changedIds, message: parts.join(" · ") };
 }
 
+// Reload everything and redraw. Returns false if the server couldn't be
+// loaded (the banner then explains; the previous data stays on screen).
 async function refreshFromServer(toastMsg) {
-  try {
-    [recipes, ingredients] = await Promise.all([apiRequest("/recipes"), apiRequest("/pantry")]);
-    usingLiveApi = true;
-  } catch (e) {
-    return; // keep showing what we have; the socket will trigger another try
-  }
-  // Separate from the line above: until the backend has /shopping, its 404
-  // must not stop recipes and pantry from refreshing.
   const before = shoppingItems;
-  const wasLive = shoppingSource === "live";
-  shoppingItems = await loadShopping();
+  const hadData = hasLoadedOnce;
+  try {
+    await loadAll();
+  } catch (e) {
+    loadError = "Couldn't load the latest data: " + errorMessage(e) +
+      ". Changes can't be saved until the server is back; this page reloads by itself when it is.";
+    updateApiStatus();
+    return false;
+  }
 
-  // Only diff live data against live data: switching from the sample list
-  // to the server's (e.g. on reconnect) isn't "someone changed something".
+  // The first successful load isn't "someone changed something".
   let changeMessage = "";
-  if (wasLive && shoppingSource === "live") {
+  if (hadData) {
     const { changedIds, message } = describeShoppingChanges(before, shoppingItems);
     changeMessage = message;
     if (changedIds.length) {
@@ -1777,6 +1721,14 @@ async function refreshFromServer(toastMsg) {
   renderPlan(); // keeps any "Added …" result on screen
   if (!toastMsg && changeMessage) toastMsg = changeMessage;
 
+  // Data just arrived for the first time (server was down at start): show
+  // the view the URL asks for, e.g. a #/recipes/{id} that couldn't open yet.
+  if (!hadData) {
+    router();
+    if (toastMsg) showToast(toastMsg);
+    return true;
+  }
+
   // If the recipe being edited was deleted by another user, say so rather
   // than letting a later save fail with a confusing 404.
   const editing = currentRecipe && !el("view-detail").hidden;
@@ -1784,11 +1736,12 @@ async function refreshFromServer(toastMsg) {
     if (!recipes.some((r) => r.id === currentRecipe.id)) {
       showToast("This recipe was deleted by another user");
       backToRecipes();
-      return;
+      return true;
     }
     renderMissingPanel(); // pantry quantities may have changed
   }
   if (toastMsg) showToast(toastMsg);
+  return true;
 }
 
 // Re-rendering the pantry rebuilds its inputs, which would kick the user out
@@ -1806,14 +1759,31 @@ function renderPantryKeepingFocus() {
 
 // ---- Boot ------------------------------------------------------------------
 function updateApiStatus() {
-  el("apiDot").classList.toggle("live", usingLiveApi);
-  el("apiStatusText").textContent = usingLiveApi
+  el("apiDot").classList.toggle("live", serverReachable);
+  el("apiStatusText").textContent = serverReachable
     ? `Connected to ${API_BASE}`
-    : `No server at ${API_BASE} — showing sample data`;
+    : `Can't reach ${API_BASE}`;
+  el("serverNotice").hidden = !loadError;
+  el("serverNoticeText").textContent = loadError;
+}
+
+// Shown in place of a view's contents until the first load succeeds, so an
+// unreachable server doesn't look like "you have no recipes".
+function notLoadedHtml(what) {
+  return `
+    <div class="card empty-state">
+      <strong>${what} hasn't loaded</strong>
+      The server couldn't be reached — see the message above.
+    </div>`;
 }
 
 async function init() {
-  [recipes, ingredients, shoppingItems] = await Promise.all([loadRecipes(), loadPantry(), loadShopping()]);
+  try {
+    await loadAll();
+  } catch (e) {
+    loadError = "Couldn't load data from the server: " + errorMessage(e) +
+      ". This page reloads by itself when the server is back.";
+  }
   updateApiStatus();
   renderRecipeList();
   renderPantry();
