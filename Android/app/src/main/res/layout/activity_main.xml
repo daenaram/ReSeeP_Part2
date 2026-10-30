@@ -19,7 +19,7 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:gravity="center"
             android:orientation="vertical">
 
@@ -70,7 +70,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="Enter your username to continue."
+                    android:text="Enter your login details to continue."
                     android:textColor="#718078"
                     android:textSize="14sp" />
 
@@ -91,6 +91,28 @@
                     android:backgroundTint="#176B50"
                     android:hint="Enter your username"
                     android:inputType="text"
+                    android:padding="12dp"
+                    android:singleLine="true"
+                    android:textColor="#173D30"
+                    android:textColorHint="#9AA79F" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="Password"
+                    android:textColor="#294D40"
+                    android:textStyle="bold"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/passwordInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="54dp"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="#176B50"
+                    android:hint="Enter your password"
+                    android:inputType="textPassword"
                     android:padding="12dp"
                     android:singleLine="true"
                     android:textColor="#173D30"
