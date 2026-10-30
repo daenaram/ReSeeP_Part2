@@ -243,6 +243,15 @@
     margin:0 0 16px;
   }
   .form-error{ color:var(--alert-dark); font-size:13px; margin:0 0 12px; }
+  .form-error[hidden]{ display:none; }
+
+  /* ---------- Inline validation ---------- */
+  .field-error{ color:var(--alert-dark); font-size:12px; margin:4px 0 0; }
+  .field-error[hidden]{ display:none; }
+  input[aria-invalid="true"], select[aria-invalid="true"]{
+    border-color:var(--alert) !important;
+    background:#FBF1F0 !important;
+  }
   .login-hint{ font-size:12px; color:var(--ink-soft); margin:16px 0 0; }
 
   .section-label{
@@ -553,6 +562,8 @@
         <ul class="missing-list" id="missingList"></ul>
       </div>
 
+      <p class="form-error" id="recipeFormError" role="alert" style="margin:16px 0 0;" hidden></p>
+
       <div class="detail-actions">
         <button class="btn btn-danger" id="btnDeleteRecipe">Delete recipe</button>
         <div class="right">
@@ -782,6 +793,72 @@ function showToast(msg) {
   showToast._timer = setTimeout(() => t.classList.remove("show"), 2200);
 }
 
+// ---- Inline validation -----------------------------------------------------
+// Problems with what the user typed are shown on the field itself (red
+// border + message under it) and checked before anything is sent, so the
+// server's 400s are only a backstop. Editing the field clears its error.
+
+// Where a field's message goes: inside its .field, or under its row for the
+// one-line forms (add ingredient, pantry rows).
+function errorHostFor(input) {
+  return input.closest(".field") || input.closest(".add-ingredient, .pantry-row, .ingredient-row") || input.parentElement;
+}
+
+let fieldErrorCount = 0;
+
+// Returns false so callers can `return showFieldError(...)`.
+function showFieldError(input, message) {
+  const host = errorHostFor(input);
+  let msg = host._errorEl;
+  if (!msg || !msg.isConnected) {
+    msg = document.createElement("p");
+    msg.className = "field-error";
+    msg.id = "field-error-" + (++fieldErrorCount);
+    msg.setAttribute("role", "alert");
+    if (host.classList.contains("field")) host.appendChild(msg);
+    else host.after(msg);
+    host._errorEl = msg;
+  }
+  msg.textContent = message;
+  msg.hidden = false;
+  input.setAttribute("aria-invalid", "true");
+  input.setAttribute("aria-describedby", msg.id);
+  input.focus();
+  return false;
+}
+
+function clearFieldError(input) {
+  input.removeAttribute("aria-invalid");
+  input.removeAttribute("aria-describedby");
+  const host = errorHostFor(input);
+  if (host._errorEl && !host.querySelector('[aria-invalid="true"]')) host._errorEl.hidden = true;
+}
+
+document.addEventListener("input", (e) => {
+  if (e.target.getAttribute?.("aria-invalid") === "true") clearFieldError(e.target);
+});
+
+// Reads a quantity box. Returns { value } or { error }.
+//   allowZero: is 0 acceptable (pantry stock) or not (an amount to use/buy)?
+//   emptyValue: if given, an empty box means this instead of an error.
+function readQty(input, { allowZero = true, emptyValue } = {}) {
+  if (input.validity?.badInput) return { error: "Enter a number" };
+  const raw = input.value.trim();
+  if (raw === "") {
+    return emptyValue !== undefined ? { value: emptyValue } : { error: "Enter a quantity" };
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return { error: "Enter a number" };
+  if (n < 0) return { error: "Quantity can't be negative" };
+  if (n === 0 && !allowZero) return { error: "Quantity must be more than 0" };
+  if (n > 1000000) return { error: "That quantity is too large" };
+  return { value: n };
+}
+
+function isDuplicateIngredientName(name) {
+  return ingredients.some((i) => i.name.trim().toLowerCase() === name.toLowerCase());
+}
+
 // ---- Sign-in and roles -----------------------------------------------------
 //   POST {API_BASE}/login  { username, password }  ->  { id, username, role }
 // role is "COOK" or "SHOPPER"; a wrong username/password is a 401.
@@ -846,11 +923,9 @@ el("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const username = el("fUsername").value.trim();
   const password = el("fPassword").value;
-  if (!username || !password) {
-    showLoginError("Enter your username and password.");
-    (username ? el("fPassword") : el("fUsername")).focus();
-    return;
-  }
+  showLoginError(null);
+  if (!username) return showFieldError(el("fUsername"), "Enter your username");
+  if (!password) return showFieldError(el("fPassword"), "Enter your password");
 
   el("btnSignIn").disabled = true;
   try {
@@ -1052,6 +1127,9 @@ function renderDetail(isNew) {
   el("fRecipeNotes").value = currentRecipe.notes || "";
   el("btnDeleteRecipe").style.visibility = isNew ? "hidden" : "visible";
   el("btnPlanRecipe").hidden = isNew; // only a saved recipe can be planned
+  // A fresh editor shouldn't show errors from the last recipe.
+  ["fRecipeName", "fRecipeServings", "addIngredientQty"].forEach((id) => clearFieldError(el(id)));
+  el("recipeFormError").hidden = true;
 
   renderIngredientRows();
   renderAddIngredientSelect();
@@ -1117,8 +1195,9 @@ el("btnAddIngredient").addEventListener("click", () => {
   const qtyInput = el("addIngredientQty");
   const ingId = select.value;
   if (!ingId) return;
-  const qty = Number(qtyInput.value) || 1;
-  currentRecipe.items.push({ ingredientId: normalizeId(ingId), qty });
+  const qty = readQty(qtyInput, { allowZero: false });
+  if (qty.error) return showFieldError(qtyInput, qty.error);
+  currentRecipe.items.push({ ingredientId: normalizeId(ingId), qty: qty.value });
   qtyInput.value = "";
   renderIngredientRows();
   renderAddIngredientSelect();
@@ -1148,6 +1227,8 @@ function hideNewIngredientForm() {
   el("newRecipeIngredientName").value = "";
   el("newRecipeIngredientUnit").value = "";
   el("newRecipeIngredientQty").value = "";
+  clearFieldError(el("newRecipeIngredientName"));
+  clearFieldError(el("newRecipeIngredientQty"));
 }
 
 el("btnConfirmNewIngredient").addEventListener("click", async () => {
@@ -1156,17 +1237,14 @@ el("btnConfirmNewIngredient").addEventListener("click", async () => {
   const qtyInput = el("newRecipeIngredientQty");
 
   const name = nameInput.value.trim();
-  if (!name) {
-    showToast("Give the ingredient a name first");
-    nameInput.focus();
-    return;
+  if (!name) return showFieldError(nameInput, "Give the ingredient a name");
+  if (isDuplicateIngredientName(name)) {
+    return showFieldError(nameInput, "Already in your pantry — pick it from the list above");
   }
-  if (ingredients.some((i) => i.name.toLowerCase() === name.toLowerCase())) {
-    showToast("That ingredient is already in your pantry — pick it from the list above");
-    return;
-  }
+  const qty = readQty(qtyInput, { allowZero: false });
+  if (qty.error) return showFieldError(qtyInput, qty.error + " (how much the recipe needs)");
 
-  const recipeQty = Number(qtyInput.value) || 1;
+  const recipeQty = qty.value;
   const newPantryItem = {
     name,
     unit: unitInput.value.trim() || "unit",
@@ -1227,14 +1305,30 @@ function backToRecipes() {
 }
 
 el("btnSaveRecipe").addEventListener("click", async () => {
-  const name = el("fRecipeName").value.trim();
-  if (!name) {
-    showToast("Give the recipe a title before saving");
-    el("fRecipeName").focus();
-    return;
+  el("recipeFormError").hidden = true;
+
+  const nameInput = el("fRecipeName");
+  const name = nameInput.value.trim();
+  if (!name) return showFieldError(nameInput, "Give the recipe a title");
+
+  const servingsInput = el("fRecipeServings");
+  const servings = Number(servingsInput.value);
+  if (servingsInput.validity.badInput || servingsInput.value.trim() === "") {
+    return showFieldError(servingsInput, "Enter how many it serves");
   }
+  if (!Number.isInteger(servings) || servings < 1) {
+    return showFieldError(servingsInput, "Use a whole number, 1 or more");
+  }
+
+  // Each ingredient line needs a real amount; a 0 or blank line would make
+  // the "what's missing" check and planning meaningless.
+  for (const input of el("ingredientRows").querySelectorAll(".qtyInput")) {
+    const qty = readQty(input, { allowZero: false });
+    if (qty.error) return showFieldError(input, qty.error);
+  }
+
   currentRecipe.name = name;
-  currentRecipe.servings = Math.max(1, Number(el("fRecipeServings").value) || 1);
+  currentRecipe.servings = servings;
   currentRecipe.notes = el("fRecipeNotes").value.trim();
 
   let saved;
@@ -1242,8 +1336,11 @@ el("btnSaveRecipe").addEventListener("click", async () => {
   try {
     saved = await saveRecipeApi(currentRecipe);
   } catch (e) {
-    // Stay in the editor with their changes so they can fix it or retry.
-    showToast("Couldn't save the recipe: " + errorMessage(e));
+    // Stay in the editor with their changes so they can fix it or retry;
+    // put the reason next to the Save button as well as in a toast.
+    el("recipeFormError").textContent = "Couldn't save the recipe: " + errorMessage(e);
+    el("recipeFormError").hidden = false;
+    showToast("Couldn't save the recipe");
     return;
   } finally {
     el("btnSaveRecipe").disabled = false;
@@ -1305,11 +1402,16 @@ function renderPantry() {
       const id = normalizeId(e.target.dataset.id); // dataset values are always strings; ingredient ids from the backend are numbers
       const ing = findIngredient(id);
       if (!ing) return; // shouldn't happen, but avoid crashing on a stale row
-      const qtyOnHand = Number(e.target.value) || 0;
+      // Leave a bad value in the box (marked) so they can see and fix it;
+      // nothing is sent and the saved quantity is unchanged.
+      const qty = readQty(e.target, { allowZero: true });
+      if (qty.error) return showFieldError(e.target, qty.error);
+      const qtyOnHand = qty.value;
       try {
         const saved = await savePantryItemApi({ ...ing, qtyOnHand });
         Object.assign(ing, saved || { qtyOnHand });
       } catch (err) {
+        if (err.status === 400) return showFieldError(e.target, err.message); // server rejected the value
         e.target.value = ing.qtyOnHand; // put back the value the server still has
         showToast("Couldn't update the pantry: " + errorMessage(err));
         return;
@@ -1325,16 +1427,17 @@ el("btnAddPantryItem").addEventListener("click", async () => {
   const unitInput = el("newIngredientUnit");
   const qtyInput = el("newIngredientQty");
   const name = nameInput.value.trim();
-  if (!name) {
-    showToast("Give the ingredient a name first");
-    nameInput.focus();
-    return;
+  if (!name) return showFieldError(nameInput, "Give the ingredient a name");
+  if (isDuplicateIngredientName(name)) {
+    return showFieldError(nameInput, "Already in your pantry — change its quantity above instead");
   }
+  const qty = readQty(qtyInput, { allowZero: true, emptyValue: 0 }); // blank = none on hand yet
+  if (qty.error) return showFieldError(qtyInput, qty.error);
 
   const newItem = {
     name,
     unit: unitInput.value.trim() || "unit",
-    qtyOnHand: Number(qtyInput.value) || 0
+    qtyOnHand: qty.value
   };
 
   let created;
