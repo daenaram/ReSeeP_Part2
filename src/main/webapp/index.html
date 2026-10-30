@@ -86,6 +86,7 @@
     overflow-x:auto;
     overflow-y:hidden;
   }
+  .tabs[hidden]{ display:none; }
   .tab-btn{
     background:none;
     border:none;
@@ -1888,6 +1889,7 @@ function notLoadedHtml(what) {
 }
 
 async function init() {
+  updateUserBar(); // a user restored from sessionStorage needs the header and tabs too
   try {
     await loadAll();
   } catch (e) {
