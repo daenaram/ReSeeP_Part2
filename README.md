@@ -250,6 +250,49 @@ and acks it without touching the pantry again, because `processed_events`
 already has a row for that `eventId`. This demonstrates the brief's "a
 repeated event is ignored" requirement.
 
+## Response-time test (non-functional requirement)
+
+**Operation:** the Cook changes a pantry quantity (`PUT /api/pantry/{id}`), a
+full write through REST → service → MySQL that also broadcasts a
+`pantry-updated` live update.
+
+| Id | Requirement | Target |
+|----|-------------|--------|
+| T1 | HTTP response time | 95th percentile ≤ 1000 ms |
+| T2 | Live update reaches another open client (from sending the request to the WebSocket event arriving) | 95th percentile ≤ 1000 ms |
+
+1 second is the usual limit for a response to still feel uninterrupted; for
+the shared shopping list it means the other user sees a change while they're
+still looking at the screen.
+
+With Payara running, from the repository root (needs only a JDK, no build):
+
+```
+java perf/ResponseTimeTest.java                                  # 50 requests to localhost
+java perf/ResponseTimeTest.java http://localhost:8080/reseep 100 # custom URL / count
+```
+
+It sends 5 warm-up requests, then the measured ones one after another, while
+a second WebSocket client listens for each update. It alternates the first
+pantry ingredient between its quantity and +1 and restores the original at
+the end, so it leaves no net change (open web pages will refresh on each
+change while it runs). It prints min/median/mean/p95/max with PASS/FAIL,
+exits 0 only if both targets are met, and writes the raw timings to
+`perf/results/response-times-<timestamp>.csv`.
+
+**Result (30 Oct 2026):** Payara 7 on Windows 11 / JDK 21 on localhost, AWS
+RDS MySQL database, 1 client, 50 sequential requests.
+
+| | min | median | mean | p95 | max | Result |
+|---|---|---|---|---|---|---|
+| T1 HTTP response (ms) | 164 | 333 | 333 | 440 | 468 | PASS |
+| T2 Live update (ms) | 157 | 325 | 326 | 435 | 460 | PASS |
+
+The live update arrives slightly *before* the HTTP response because it is
+sent as soon as the transaction commits, while the response is still being
+written. Almost all of the time is the round trip to the remote database;
+this is a single-user test, not a load test.
+
 ## Known limitations
 
 - No authentication — anyone who can reach the API can read/write everything.
