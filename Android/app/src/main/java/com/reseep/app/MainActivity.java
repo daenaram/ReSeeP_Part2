@@ -11,6 +11,7 @@ import com.reseep.app.api.ApiService;
 import com.reseep.app.api.LoginRequest;
 import com.reseep.app.api.LoginResponse;
 import com.reseep.app.api.RetrofitClient;
+import android.content.Intent;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -81,7 +82,9 @@ public class MainActivity extends AppCompatActivity {
                             .putString("role", user.getRole())
                             .apply();
 
-                    showMessage("Welcome, " + user.getUsername() + "!");
+                    Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
+                    startActivity(intent);
+                    finish();
 
                 } else {
                     showMessage("Invalid username or password.");
