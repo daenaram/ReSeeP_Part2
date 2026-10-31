@@ -9,6 +9,8 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.os.Handler;
+import android.os.Looper;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -39,6 +41,11 @@ public class DashboardActivity extends AppCompatActivity {
     private final int DARK = Color.rgb(35, 59, 48);
     private final int MUTED = Color.rgb(112, 130, 119);
     private final int LIGHT_GREEN = Color.rgb(237, 246, 240);
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private static final int MAX_PANTRY_CHECKS = 10;
+    private static final long PANTRY_CHECK_DELAY = 1000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -138,11 +145,15 @@ public class DashboardActivity extends AppCompatActivity {
                             activeCount++;
 
                             String id = item.get("id").getAsString();
+                            int ingredientId = item.get("ingredientId").getAsInt();
+                            double amount = item.get("qty").getAsDouble();
+
                             String name = item.get("ingredientName").getAsString();
                             String quantity = item.get("qty").getAsString();
                             String unit = item.get("unit").getAsString();
 
-                            addShoppingItem(id, name, quantity + " " + unit);
+                            addShoppingItem(id, ingredientId, amount,
+                                    name, quantity + " " + unit);
                         }
                     }
 
@@ -182,7 +193,7 @@ public class DashboardActivity extends AppCompatActivity {
         addDivider(pantryContainer);
     }
 
-    private void addShoppingItem(final String id, String name, String quantity) {
+    private void addShoppingItem(final String id, final int ingredientId, final double amount, String name, String quantity) {
         LinearLayout row = createRow();
 
         LinearLayout details = new LinearLayout(this);
@@ -210,7 +221,7 @@ public class DashboardActivity extends AppCompatActivity {
             public void onClick(View view) {
                 boughtButton.setEnabled(false);
                 boughtButton.setText("Updating...");
-                markBought(id, boughtButton);
+                markBought(id, ingredientId, amount, boughtButton);
             }
         });
 
@@ -219,29 +230,160 @@ public class DashboardActivity extends AppCompatActivity {
         addDivider(shoppingContainer);
     }
 
-    private void markBought(String id, Button button) {
-        apiService.markBought(id, new BoughtRequest(userId))
-                .enqueue(new Callback<JsonObject>() {
-                    @Override
-                    public void onResponse(Call<JsonObject> call,
-                                           Response<JsonObject> response) {
-                        if (response.isSuccessful()) {
-                            loadDashboard();
-                        } else {
-                            button.setEnabled(true);
-                            button.setText("Bought");
-                            dashboardStatus.setText(
-                                    "Couldn't update item. Please try again.");
-                        }
-                    }
+    private void markBought(final String id,
+                            final int ingredientId,
+                            final double boughtQty,
+                            final Button button) {
 
-                    @Override
-                    public void onFailure(Call<JsonObject> call, Throwable t) {
-                        button.setEnabled(true);
-                        button.setText("Bought");
-                        dashboardStatus.setText("Connection error. Try again.");
+        dashboardStatus.setText("Checking pantry...");
+
+        // Get the pantry quantity before the purchase.
+        apiService.getPantry().enqueue(new Callback<JsonArray>() {
+            @Override
+            public void onResponse(Call<JsonArray> call,
+                                   Response<JsonArray> response) {
+
+                if (!response.isSuccessful() || response.body() == null) {
+                    button.setEnabled(true);
+                    button.setText("Bought");
+                    dashboardStatus.setText("Could not check pantry.");
+                    return;
+                }
+
+                double previousQty = findPantryQuantity(
+                        response.body(), ingredientId);
+
+                if (Double.isNaN(previousQty)) {
+                    button.setEnabled(true);
+                    button.setText("Bought");
+                    dashboardStatus.setText("Ingredient not found in pantry.");
+                    return;
+                }
+
+                final double expectedQty = previousQty + boughtQty;
+
+                // Submit the purchase exactly once.
+                apiService.markBought(id, new BoughtRequest(userId))
+                        .enqueue(new Callback<JsonObject>() {
+
+                            @Override
+                            public void onResponse(Call<JsonObject> call,
+                                                   Response<JsonObject> response) {
+
+                                if (response.isSuccessful()) {
+                                    button.setText("Processing...");
+                                    dashboardStatus.setText(
+                                            "Purchase recorded. Updating pantry...");
+
+                                    waitForPantryUpdate(
+                                            ingredientId, expectedQty, 0, button);
+                                } else {
+                                    button.setEnabled(true);
+                                    button.setText("Bought");
+                                    dashboardStatus.setText(
+                                            "Purchase failed. Please try again.");
+                                }
+                            }
+
+                            @Override
+                            public void onFailure(Call<JsonObject> call,
+                                                  Throwable t) {
+                                button.setEnabled(true);
+                                button.setText("Bought");
+                                dashboardStatus.setText(
+                                        "Connection error. Please try again.");
+                            }
+                        });
+            }
+
+            @Override
+            public void onFailure(Call<JsonArray> call, Throwable t) {
+                button.setEnabled(true);
+                button.setText("Bought");
+                dashboardStatus.setText("Could not check pantry.");
+            }
+        });
+    }
+
+
+    // Find the current quantity of an ingredient.
+    private double findPantryQuantity(JsonArray items, int ingredientId) {
+
+        for (int i = 0; i < items.size(); i++) {
+            JsonObject item = items.get(i).getAsJsonObject();
+
+            if (item.get("id").getAsInt() == ingredientId) {
+                return item.get("qtyOnHand").getAsDouble();
+            }
+        }
+
+        return Double.NaN;
+    }
+
+
+    // Wait until the consumer has updated the pantry.
+    private void waitForPantryUpdate(final int ingredientId,
+                                     final double expectedQty,
+                                     final int attempt,
+                                     final Button button) {
+
+        if (attempt >= MAX_PANTRY_CHECKS) {
+            button.setText("Recorded");
+            button.setEnabled(false);
+
+            dashboardStatus.setText(
+                    "Purchase recorded, but pantry update is delayed. " +
+                            "Please refresh shortly.");
+
+            return;
+        }
+
+        apiService.getPantry().enqueue(new Callback<JsonArray>() {
+
+            @Override
+            public void onResponse(Call<JsonArray> call,
+                                   Response<JsonArray> response) {
+
+                if (response.isSuccessful() && response.body() != null) {
+
+                    double currentQty = findPantryQuantity(
+                            response.body(), ingredientId);
+
+                    if (!Double.isNaN(currentQty)
+                            && currentQty >= expectedQty - 0.0001) {
+
+                        // Pantry update confirmed. Refresh everything.
+                        loadDashboard();
+                        return;
                     }
-                });
+                }
+
+                scheduleNextPantryCheck(
+                        ingredientId, expectedQty, attempt, button);
+            }
+
+            @Override
+            public void onFailure(Call<JsonArray> call, Throwable t) {
+
+                scheduleNextPantryCheck(
+                        ingredientId, expectedQty, attempt, button);
+            }
+        });
+    }
+
+
+    private void scheduleNextPantryCheck(final int ingredientId,
+                                         final double expectedQty,
+                                         final int attempt,
+                                         final Button button) {
+
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                waitForPantryUpdate(
+                        ingredientId, expectedQty, attempt + 1, button);
+            }
+        }, PANTRY_CHECK_DELAY);
     }
 
     private LinearLayout createRow() {
